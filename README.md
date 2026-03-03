@@ -1,2 +1,2 @@
 # WorkWatcher
-C console application for work management
+Консольное приложение на C для измерения времени

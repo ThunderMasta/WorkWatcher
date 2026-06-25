@@ -1,9 +1,57 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include <unistd.h>  // для функции sleep
-#include <termios.h>  // для управления терминалом
-#include <sys/select.h> // для select()
+#include <unistd.h>
+#include <termios.h>
+#include <signal.h>
+#include <sys/select.h>
+
+static struct termios saved_termios;
+static int terminal_is_raw = 0;
+
+static void restore_terminal(void)
+{
+    if (terminal_is_raw) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &saved_termios);
+        terminal_is_raw = 0;
+    }
+}
+
+static int setup_terminal(void)
+{
+    if (tcgetattr(STDIN_FILENO, &saved_termios) != 0) {
+        return -1;
+    }
+
+    struct termios raw = saved_termios;
+    raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN);
+    raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    raw.c_oflag &= ~(OPOST);
+    raw.c_cflag |= CS8;
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 0;
+
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) != 0) {
+        return -1;
+    }
+
+    terminal_is_raw = 1;
+    return 0;
+}
+
+static void on_signal(int sig)
+{
+    restore_terminal();
+    _exit(128 + sig);
+}
+
+#define REFRESH_INTERVAL_US 250000
+
+static void clear_screen(void)
+{
+    printf("\033[2J\033[H");
+    fflush(stdout);
+}
 
 void print_time(double seconds_time) {
     // Вычисляем часы, минуты и секунды
@@ -24,183 +72,145 @@ void print_time_difference(
     print_time(work_seconds);
     printf(" - Дом: ");
     print_time(home_seconds);
-    printf("\r\n");
 }
 
-void print_finish_time(double work_seconds)
+static void print_finish_line(double work_seconds)
 {
     int need_to_work = 8 * 3600 - work_seconds;
 
     if (need_to_work <= 0) {
-        printf("Работа закончена!\r\n");
-
+        printf("Работа закончена!");
         return;
     }
 
-    // Получаем текущее время
     time_t now = time(NULL);
-    // Прибавляем оставшееся время до 8 часов
     time_t finish_time = now + (time_t)need_to_work;
-    // Преобразуем в локальное время
     struct tm *tm_finish = localtime(&finish_time);
 
-    // Выводим предполагаемое время окончания 8-часового рабочего дня
     printf(
-        "Работа закончится: %02d:%02d:%02d\r\n",
+        "Работа закончится: %02d:%02d:%02d",
         tm_finish->tm_hour,
         tm_finish->tm_min,
         tm_finish->tm_sec);
 }
 
-void print_times(
-    double work_seconds,
-    double home_seconds
-)
+static void refresh_times(double work_seconds, double home_seconds)
 {
+    printf("\033[1;1H\033[2K");
     print_time_difference(work_seconds, home_seconds);
-    print_finish_time(work_seconds);
+
+    printf("\033[2;1H\033[2K");
+    print_finish_line(work_seconds);
+
+    fflush(stdout);
 }
 
-void write_work(
-    struct tm start_local_time,
-    double work_seconds,
-    double home_seconds)
+typedef enum {
+    MODE_WORK,
+    MODE_HOME
+} Mode;
+
+static void refresh_display(
+    Mode mode,
+    time_t phase_start,
+    double work_accumulated,
+    double home_accumulated)
 {
-    time_t t = time(NULL);
+    double elapsed = difftime(time(NULL), phase_start);
+    double work_seconds = work_accumulated;
+    double home_seconds = home_accumulated;
 
-    time_t start_t = mktime(&start_local_time);
+    if (mode == MODE_WORK) {
+        work_seconds += elapsed;
+    } else {
+        home_seconds += elapsed;
+    }
 
-    double seconds_diff = difftime(t, start_t);
-
-    print_times(seconds_diff + work_seconds, home_seconds);
+    refresh_times(work_seconds, home_seconds);
 }
 
-void write_home(
-    struct tm start_local_time,
-    double work_seconds,
-    double home_seconds)
-{
-    time_t t = time(NULL);
+typedef struct {
+    double work_seconds;
+    double home_seconds;
+} TimeState;
 
-    time_t start_t = mktime(&start_local_time);
-
-    double seconds_diff = difftime(t, start_t);
-
-    print_times(work_seconds, seconds_diff + home_seconds);
-}
-
-// Функция для чтения символа с таймаутом в 0.01 секунду
+// Функция для чтения символа с таймаутом
 // Возвращает символ, если он был введен, или -1 при таймауте
-int read_char_with_timeout(void) {
+static int read_char_with_timeout(void) {
     struct timeval tv;
     fd_set read_fds;
     int result;
 
-    // Настройка таймаута в 0.01 секунду
-    tv.tv_sec = 0;
-    tv.tv_usec = 10000;
+    tv.tv_sec = REFRESH_INTERVAL_US / 1000000;
+    tv.tv_usec = REFRESH_INTERVAL_US % 1000000;
 
-    // Инициализация набора дескрипторов
     FD_ZERO(&read_fds);
     FD_SET(STDIN_FILENO, &read_fds);
 
-    // Ожидание ввода
     result = select(STDIN_FILENO + 1, &read_fds, NULL, NULL, &tv);
 
     if (result == -1) {
-        // Ошибка
         return -1;
     } else if (result == 0) {
-        // Таймаут
         return -1;
     } else {
-        // Есть данные для чтения
-        int ch = getchar();
-        return ch;
+        return getchar();
     }
 }
 
-double get_work_seconds(
-    double work_seconds_old,
-    double home_seconds)
+static TimeState run_phase(Mode mode, TimeState state)
 {
-    time_t t = time(NULL);
-    struct tm start_time = *localtime(&t);
+    time_t phase_start = time(NULL);
 
-    while (1)
-    {
-        system("clear");
+    while (1) {
+        refresh_display(
+            mode,
+            phase_start,
+            state.work_seconds,
+            state.home_seconds);
 
-        write_work(start_time, work_seconds_old, home_seconds);
-
-        int ch = read_char_with_timeout();
-        
-        if (ch != -1) {
-            // Если был введен символ, то выходим из цикла
+        if (read_char_with_timeout() != -1) {
             break;
         }
     }
 
-    time_t t2 = time(NULL);
+    double elapsed = difftime(time(NULL), phase_start);
 
-    double work_seconds = difftime(t2, t);
-
-    return work_seconds + work_seconds_old;
-}
-
-double get_home_seconds(
-    double work_seconds,
-    double home_seconds_old)
-{
-    time_t t = time(NULL);
-    struct tm start_time = *localtime(&t);
-
-    while (1)
-    {
-        system("clear");
-
-        write_home(start_time, work_seconds, home_seconds_old);
-
-        int ch = read_char_with_timeout();
-        
-        if (ch != -1) {
-            // Если был введен символ, то выходим из цикла
-            break;
-        }
+    if (mode == MODE_WORK) {
+        state.work_seconds += elapsed;
+    } else {
+        state.home_seconds += elapsed;
     }
 
-    time_t t2 = time(NULL);
-
-    double home_seconds = difftime(t2, t);
-
-    return home_seconds + home_seconds_old;
+    return state;
 }
 
 int main(void) {
-    system("clear");
+    clear_screen();
 
-    system("/bin/stty raw"); // Set terminal to raw mode
+    if (setup_terminal() != 0) {
+        fprintf(stderr, "Не удалось настроить терминал\n");
+        return 1;
+    }
 
-    double work_seconds = 0;
-    double home_seconds = 0;
+    atexit(restore_terminal);
 
-    time_t t = time(NULL);
-    struct tm start_time = *localtime(&t);
+    struct sigaction sa;
+    sa.sa_handler = on_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+
+    TimeState state = {0, 0};
 
     while (1)
     {
-        work_seconds = get_work_seconds(
-            work_seconds,
-            home_seconds
-        );
-
-        home_seconds = get_home_seconds(
-            work_seconds,
-            home_seconds
-        );
+        state = run_phase(MODE_WORK, state);
+        state = run_phase(MODE_HOME, state);
     }
 
-    system("/bin/stty cooked"); // Restore terminal to cooked mode
+    restore_terminal();
 
     return 0;
 }

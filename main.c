@@ -27,6 +27,40 @@ void print_time_difference(
     printf("\r\n");
 }
 
+void print_finish_time(double work_seconds)
+{
+    int need_to_work = 8 * 3600 - work_seconds;
+
+    if (need_to_work <= 0) {
+        printf("Работа закончена!\r\n");
+
+        return;
+    }
+
+    // Получаем текущее время
+    time_t now = time(NULL);
+    // Прибавляем оставшееся время до 8 часов
+    time_t finish_time = now + (time_t)need_to_work;
+    // Преобразуем в локальное время
+    struct tm *tm_finish = localtime(&finish_time);
+
+    // Выводим предполагаемое время окончания 8-часового рабочего дня
+    printf(
+        "Работа закончится: %02d:%02d:%02d\r\n",
+        tm_finish->tm_hour,
+        tm_finish->tm_min,
+        tm_finish->tm_sec);
+}
+
+void print_times(
+    double work_seconds,
+    double home_seconds
+)
+{
+    print_time_difference(work_seconds, home_seconds);
+    print_finish_time(work_seconds);
+}
+
 void write_work(
     struct tm start_local_time,
     double work_seconds,
@@ -38,7 +72,7 @@ void write_work(
 
     double seconds_diff = difftime(t, start_t);
 
-    print_time_difference(seconds_diff + work_seconds, home_seconds);
+    print_times(seconds_diff + work_seconds, home_seconds);
 }
 
 void write_home(
@@ -52,7 +86,7 @@ void write_home(
 
     double seconds_diff = difftime(t, start_t);
 
-    print_time_difference(work_seconds, seconds_diff + home_seconds);
+    print_times(work_seconds, seconds_diff + home_seconds);
 }
 
 // Функция для чтения символа с таймаутом в 0.01 секунду

@@ -24,6 +24,8 @@ WERROR     ?= 0
 V          ?= 0
 
 CC           ?= cc
+# Требуется clang-format 21.x: 18.x и 21.x по-разному обрабатывают выравнивание
+# хвостовых комментариев с не-ASCII текстом (см. CONTRIBUTING.md).
 CLANG_FORMAT ?= clang-format
 CLANG_TIDY   ?= clang-tidy
 

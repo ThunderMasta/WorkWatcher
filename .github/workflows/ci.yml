@@ -52,10 +52,23 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-format clang-tidy
+          sudo apt-get install -y clang-tidy
+
+      # Версия clang-format зафиксирована намеренно. 18.x и 21.x по-разному
+      # считают ширину строки при выравнивании хвостовых комментариев с
+      # не-ASCII (кириллическим) текстом: 18.x измеряет байты, 21.x — колонки.
+      # Из-за этого 18.x (версия из apt на ubuntu-latest) отвергает код,
+      # отформатированный 21.x, поэтому локально и в CI должна быть одна
+      # версия. Подробности — в CONTRIBUTING.md.
+      - name: Install clang-format (pinned version)
+        run: |
+          python3 -m pip install --user --break-system-packages clang-format==21.1.8
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Check formatting
-        run: make format-check
+        run: |
+          clang-format --version
+          make format-check
 
       - name: Static analysis
         run: make lint

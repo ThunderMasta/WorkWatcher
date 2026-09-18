@@ -26,7 +26,8 @@
 
 - POSIX-совместимая ОС (macOS, Linux).
 - Компилятор C11 (`clang` или `gcc`) и `make`.
-- Опционально для разработки: `clang-format`, `clang-tidy`.
+- Опционально для разработки: `clang-format` 21.x (версия важна — см.
+  [CONTRIBUTING.md](CONTRIBUTING.md)), `clang-tidy`.
 
 ## Быстрый старт
 

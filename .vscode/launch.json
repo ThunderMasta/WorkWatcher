@@ -1,19 +1,31 @@
 {
+    "version": "0.2.0",
     "configurations": [
         {
-            "name": "C/C++: clang сборка и отладка активного файла",
+            "name": "WorkWatcher (debug, lldb)",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${fileDirname}/${fileBasenameNoExtension}",
+            "program": "${workspaceFolder}/build/workwatcher",
             "args": [],
             "stopAtEntry": false,
-            "cwd": "${fileDirname}",
-            "environment": [
-            ],
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": true,
+            "MIMode": "lldb",
+            "preLaunchTask": "make: build (debug)"
+        },
+        {
+            "name": "Unit tests (lldb)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/workwatcher_tests",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
             "externalConsole": false,
             "MIMode": "lldb",
-            "preLaunchTask": "C/C++: clang сборка активного файла"
+            "preLaunchTask": "make: test"
         }
-    ],
-    "version": "2.0.0"
+    ]
 }

@@ -1,0 +1,12 @@
+# Нормализация переводов строк: в репозитории всегда LF.
+* text=auto eol=lf
+
+# Скрипты должны сохранять LF даже при checkout на Windows.
+*.sh      text eol=lf
+*.command text eol=lf
+Makefile  text eol=lf
+
+# Бинарные файлы.
+*.png  binary
+*.jpg  binary
+*.jpeg binary

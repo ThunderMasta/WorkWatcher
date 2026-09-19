@@ -4,10 +4,11 @@
 
 #define ASCII_ESC 0x1BU
 
-/* Клавиша выхода. Ctrl+Q доходит до приложения байтом XON только потому,
-   что terminal.c отключает IXON. Cmd+Q использовать нельзя: его перехватывает
-   само приложение терминала и в программу ничего не передаёт. */
-#define CTRL_Q 0x11U
+/* Клавиша выхода. Ctrl+C доходит до приложения байтом только потому, что
+   terminal.c отключает ISIG: иначе драйвер терминала превратил бы комбинацию
+   в SIGINT и до парсера байт 0x03 не дошёл. Cmd+Q использовать нельзя: его
+   перехватывает само приложение терминала и в программу ничего не передаёт. */
+#define CTRL_C 0x03U
 
 /* Биты поля Cb в отчётах мыши (общие для X10 и SGR). */
 #define MOUSE_BUTTON_MASK        0x03U
@@ -26,7 +27,7 @@ typedef struct mouse_report {
 
 static bool is_quit_byte(unsigned char byte)
 {
-    return byte == CTRL_Q;
+    return byte == CTRL_C;
 }
 
 static bool is_digit(unsigned char byte)

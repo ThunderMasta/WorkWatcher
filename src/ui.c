@@ -70,7 +70,7 @@ void ww_ui_render(const ww_tracker_t *projected, double now_realtime)
     /* В raw-режиме OPOST отключён, поэтому переводы строк не используются:
        каждая строка адресуется явно. */
     printf(LINE(1) LABEL_WORK ": %s - " LABEL_HOME ": %s" LINE(2) "%s" LINE(3) DIM
-           "Любая клавиша или кнопка мыши — сменить режим, Ctrl+Q — выход" RESET,
+           "Любая клавиша или кнопка мыши — сменить режим, Ctrl+C — выход" RESET,
            work_buf, home_buf, finish_buf);
     fflush(stdout);
 }

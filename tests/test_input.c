@@ -32,29 +32,29 @@ WW_TEST(escape_sequences_of_keys_toggle)
     WW_ASSERT_EQ_INT(parse_str("\033OP"), WW_INPUT_TOGGLE);   /* F1 */
 }
 
-WW_TEST(ctrl_q_requests_quit)
+WW_TEST(ctrl_c_requests_quit)
 {
-    WW_ASSERT_EQ_INT(parse_str("\x11"), WW_INPUT_QUIT); /* Ctrl+Q */
+    WW_ASSERT_EQ_INT(parse_str("\x03"), WW_INPUT_QUIT); /* Ctrl+C */
 }
 
 WW_TEST(other_control_chars_toggle)
 {
-    /* Ctrl+C, Ctrl+D, Ctrl+\ — обычные клавиши: ISIG отключён, сигналов
+    /* Ctrl+D, Ctrl+Q, Ctrl+\ — обычные клавиши: ISIG отключён, сигналов
        они не порождают. */
-    WW_ASSERT_EQ_INT(parse_str("\x03"), WW_INPUT_TOGGLE);
     WW_ASSERT_EQ_INT(parse_str("\x04"), WW_INPUT_TOGGLE);
+    WW_ASSERT_EQ_INT(parse_str("\x11"), WW_INPUT_TOGGLE);
     WW_ASSERT_EQ_INT(parse_str("\x1c"), WW_INPUT_TOGGLE);
-    WW_ASSERT_EQ_INT(parse_str("q"), WW_INPUT_TOGGLE); /* без модификатора */
+    WW_ASSERT_EQ_INT(parse_str("c"), WW_INPUT_TOGGLE); /* без модификатора */
 }
 
 WW_TEST(quit_has_priority_over_toggle)
 {
-    /* Литералы разделены: "\x11a" парсился бы как один байт 0x11A. */
-    WW_ASSERT_EQ_INT(parse_str("a\x11"), WW_INPUT_QUIT);
-    WW_ASSERT_EQ_INT(parse_str("\x11"
+    /* Литералы разделены: "\x03a" парсился бы как один байт 0x03A. */
+    WW_ASSERT_EQ_INT(parse_str("a\x03"), WW_INPUT_QUIT);
+    WW_ASSERT_EQ_INT(parse_str("\x03"
                                "a"),
                      WW_INPUT_QUIT);
-    WW_ASSERT_EQ_INT(parse_str("\033[<0;10;5M\x11"), WW_INPUT_QUIT);
+    WW_ASSERT_EQ_INT(parse_str("\033[<0;10;5M\x03"), WW_INPUT_QUIT);
 }
 
 WW_TEST(sgr_mouse_press_toggles)
@@ -119,7 +119,7 @@ void suite_input(void)
     WW_RUN(empty_input_is_none);
     WW_RUN(plain_key_toggles);
     WW_RUN(escape_sequences_of_keys_toggle);
-    WW_RUN(ctrl_q_requests_quit);
+    WW_RUN(ctrl_c_requests_quit);
     WW_RUN(other_control_chars_toggle);
     WW_RUN(quit_has_priority_over_toggle);
     WW_RUN(sgr_mouse_press_toggles);

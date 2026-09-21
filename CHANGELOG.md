@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-22
+
+### Added
+- Релизный workflow GitHub Actions (`.github/workflows/release.yml`): по пушу
+  тега `vX.Y.Z` собирает бинарники под Linux x86_64 и macOS arm64, проверяет
+  совпадение тега с `WW_VERSION_STRING`, прогоняет тесты и санитайзеры и
+  публикует GitHub Release с описанием из этого файла.
+
 ### Changed
 - Выход из приложения перенесён с `Ctrl+Q` на `Ctrl+C` (привычная комбинация;
   в raw-режиме `ISIG` отключён, поэтому она приходит байтом `0x03`, а не
@@ -58,7 +66,7 @@
 ### Removed
 - Собранный бинарник `workwatcher` из репозитория.
 
-## [0.1.0] — 2026-09-14
+## [0.1.0] — 2026-09-18
 
 ### Added
 - Учёт времени в режимах «Работа» и «Дом», переключение любой клавишей
@@ -67,6 +75,7 @@
   часов.
 - Отрисовка без мерцания; восстановление терминала по сигналам.
 
-[Unreleased]: https://github.com/ThunderMasta/WorkWatcher/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ThunderMasta/WorkWatcher/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ThunderMasta/WorkWatcher/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ThunderMasta/WorkWatcher/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ThunderMasta/WorkWatcher/releases/tag/v0.1.0

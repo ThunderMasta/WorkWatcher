@@ -46,6 +46,11 @@ scripts/run.sh --clean    # пересобрать с нуля
 
 На macOS можно запустить двойным щелчком по `WorkWatcher.command` в Finder.
 
+Готовые сборки (Linux x86_64, macOS arm64) публикуются в
+[Releases](https://github.com/ThunderMasta/WorkWatcher/releases): архив с
+бинарником, `README.md`, `CHANGELOG.md` и файл контрольной суммы. Сборку
+запускает пуш тега — см. «Релиз» в [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ### Опции командной строки
 
 ```
@@ -104,7 +109,7 @@ make LDLIBS=-lrt
 ├── tests/                 юнит-тесты (собственный мини-каркас, без зависимостей)
 ├── scripts/               вспомогательные скрипты
 ├── docs/                  документация (архитектура)
-├── .github/workflows/     CI: сборка, тесты, санитайзеры, формат, линтер
+├── .github/workflows/     CI и релиз: сборка, тесты, санитайзеры, формат, линтер
 ├── Makefile
 └── WorkWatcher.command    запуск из Finder (macOS)
 ```

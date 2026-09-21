@@ -76,6 +76,60 @@ python3 -m pip install clang-format==21.1.8  # установка, если ве
 - Тесты не зависят от окружения: часовой пояс фиксируется (`TZ=UTC`),
   реальное время в утверждениях не используется.
 
+## Релиз
+
+Релиз запускается пушем тега — дальше всё делает
+`.github/workflows/release.yml`.
+
+1. Убедитесь, что `main` зелёный и содержит все нужные изменения.
+2. Поднимите версию в `include/workwatcher/version.h` (`WW_VERSION_MAJOR`,
+   `WW_VERSION_MINOR`, `WW_VERSION_PATCH` и `WW_VERSION_STRING` — строка
+   обязана совпадать с тегом).
+3. В `CHANGELOG.md` переименуйте `[Unreleased]` в `[X.Y.Z] — ГГГГ-ММ-ДД` и
+   обновите ссылки-сноски в конце файла.
+4. Прогоните `make check`.
+5. Закоммитьте, поставьте аннотированный тег и запушьте его (обратите
+   внимание: remote называется `WorkWatcher`, а не `origin`):
+
+   ```sh
+   git add include/workwatcher/version.h CHANGELOG.md
+   git commit -m "chore(release): X.Y.Z"
+   git tag -a vX.Y.Z -m "WorkWatcher X.Y.Z"
+   git push WorkWatcher main
+   git push WorkWatcher vX.Y.Z
+   ```
+
+Что делает workflow:
+
+- сверяет тег с `WW_VERSION_STRING` и падает при расхождении (до сборки);
+- собирает с `-Werror`, прогоняет юнит-тесты и тесты под ASan/UBSan;
+- проверяет, что `--version` печатает версию из тега, а запуск без TTY
+  завершается ошибкой, а не зависает;
+- упаковывает `workwatcher-X.Y.Z-<платформа>.tar.gz` (бинарник, `README.md`,
+  `CHANGELOG.md`) и файл `.sha256`;
+- создаёт GitHub Release с описанием из раздела `[X.Y.Z]` файла
+  `CHANGELOG.md`. Предрелизы (`vX.Y.Z-rc.1`) публикуются как *prerelease*.
+
+Повторный пуш того же тега обновляет существующий релиз (описание и ассеты
+перезаписываются), а не падает. Теги без префикса `v` — исторические `0.0.1`
+и `0.0.2` — релиз не запускают: формат только `vX.Y.Z`.
+
+Локально собранный бинарник не публикуется: релизные ассеты всегда
+собираются в CI на чистом окружении.
+
+### Платформы
+
+Набор ассетов задаётся `matrix.include` в `release.yml`: Linux x86_64
+(`ubuntu-22.04` — чем старее glibc на раннере, тем шире совместимость) и
+macOS arm64 (`macos-latest`). Новая платформа добавляется одной записью в
+матрицу; `platform` попадает в имя файла.
+
+На macOS скачанный бинарник может быть помечен карантином:
+
+```sh
+xattr -d com.apple.quarantine workwatcher
+```
+
 ## Definition of Done
 
 - [ ] `make check` проходит локально.

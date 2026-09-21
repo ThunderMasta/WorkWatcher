@@ -1,0 +1,189 @@
+name: Release
+
+# Релиз запускается пушем тега вида vX.Y.Z:
+#
+#   git tag -a v0.3.0 -m "WorkWatcher 0.3.0"
+#   git push WorkWatcher v0.3.0
+#
+# Тег обязан совпадать с WW_VERSION_STRING в include/workwatcher/version.h,
+# иначе сборка падает до публикации. Описание релиза берётся из раздела
+# CHANGELOG.md с тем же номером. Подробности — в CONTRIBUTING.md.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# По умолчанию только чтение; право на запись выдаётся персонально
+# задаче release — ей нужно создавать релиз и загружать ассеты.
+permissions:
+  contents: read
+
+# Повторный пуш того же тега не должен порождать параллельные публикации.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.os }} / ${{ matrix.cc }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ubuntu-22.04, а не ubuntu-latest: бинарник линкуется с системной
+          # glibc, и сборка на свежем раннере требует слишком новую версию.
+          - os: ubuntu-22.04
+            cc: gcc
+            platform: linux-x86_64
+          # macos-latest — это Apple Silicon (arm64).
+          - os: macos-latest
+            cc: clang
+            platform: macos-arm64
+    env:
+      CC: ${{ matrix.cc }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Проверить, что тег совпадает с версией в version.h
+        id: version
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Тег ${GITHUB_REF_NAME} не соответствует формату vX.Y.Z"
+            exit 1
+          fi
+          header=$(sed -n 's/^#define WW_VERSION_STRING "\(.*\)"/\1/p' \
+            include/workwatcher/version.h)
+          if [ "$version" != "$header" ]; then
+            echo "::error::Тег ${GITHUB_REF_NAME} не совпадает с WW_VERSION_STRING '${header}' в include/workwatcher/version.h"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Сборка и юнит-тесты (-Werror)
+        run: make WERROR=1 all test
+
+      - name: Юнит-тесты под ASan/UBSan
+        run: make sanitize
+
+      - name: Smoke-тест CLI
+        run: |
+          set -euo pipefail
+          expected="${{ steps.version.outputs.version }}"
+          actual=$(./build/workwatcher --version | awk '{print $2}')
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::--version выводит '${actual}', ожидалось '${expected}'"
+            exit 1
+          fi
+          ./build/workwatcher --help > /dev/null
+          # Без TTY приложение должно завершиться с понятной ошибкой, а не зависнуть.
+          if ./build/workwatcher < /dev/null; then
+            echo "::error::Запуск без TTY завершился успешно"
+            exit 1
+          fi
+
+      - name: Упаковать артефакты
+        id: package
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          name="workwatcher-${version}-${{ matrix.platform }}"
+          mkdir -p "dist/${name}"
+          cp build/workwatcher "dist/${name}/workwatcher"
+          cp README.md CHANGELOG.md "dist/${name}/"
+          tar -C dist -czf "dist/${name}.tar.gz" "$name"
+          cd dist
+          if command -v sha256sum > /dev/null 2>&1; then
+            sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
+          else
+            shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256"
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  release:
+    name: Публикация GitHub Release
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Собрать описание из CHANGELOG.md
+        id: notes
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="$version" '
+            index($0, "## [" ver "]") == 1 { found = 1; next }
+            found && index($0, "## [") == 1 { exit }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::В CHANGELOG.md нет раздела [${version}] — описание будет пустым"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo
+            echo '---'
+            echo
+            echo "Собрано из коммита \`$(git rev-parse --short HEAD)\`. Установка:"
+            echo 'распакуйте архив и запустите `workwatcher`. Контрольные суммы — в'
+            echo 'файлах `*.sha256`.'
+            echo
+            echo 'macOS: если система блокирует запуск скачанного бинарника, снимите'
+            echo 'карантин: `xattr -d com.apple.quarantine workwatcher`.'
+          } >> "$RUNNER_TEMP/notes.md"
+
+      - name: Опубликовать релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          args=(--repo "$GITHUB_REPOSITORY" --title "WorkWatcher ${version}")
+          # Предрелизы версионируются как vX.Y.Z-rc.N.
+          if printf '%s' "$version" | grep -q -- '-'; then
+            args+=(--prerelease)
+          fi
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            # Повторный запуск на том же теге: обновляем описание и ассеты.
+            echo "Релиз ${tag} уже существует — обновляю описание и ассеты"
+            gh release edit "$tag" "${args[@]}" --notes-file "$RUNNER_TEMP/notes.md"
+            gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber \
+              dist/*.tar.gz dist/*.sha256
+          else
+            gh release create "$tag" "${args[@]}" --verify-tag \
+              --notes-file "$RUNNER_TEMP/notes.md" \
+              dist/*.tar.gz dist/*.sha256
+          fi
+
+      - name: Итог
+        run: |
+          set -euo pipefail
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --json url,assets --jq '"\(.url)\n" + ([.assets[].name] | join("\n"))'
+        env:
+          GH_TOKEN: ${{ github.token }}

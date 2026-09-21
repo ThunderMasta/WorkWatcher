@@ -88,15 +88,14 @@ python3 -m pip install clang-format==21.1.8  # установка, если ве
 3. В `CHANGELOG.md` переименуйте `[Unreleased]` в `[X.Y.Z] — ГГГГ-ММ-ДД` и
    обновите ссылки-сноски в конце файла.
 4. Прогоните `make check`.
-5. Закоммитьте, поставьте аннотированный тег и запушьте его (обратите
-   внимание: remote называется `WorkWatcher`, а не `origin`):
+5. Закоммитьте, поставьте аннотированный тег и запушьте его:
 
    ```sh
    git add include/workwatcher/version.h CHANGELOG.md
    git commit -m "chore(release): X.Y.Z"
    git tag -a vX.Y.Z -m "WorkWatcher X.Y.Z"
-   git push WorkWatcher main
-   git push WorkWatcher vX.Y.Z
+   git push origin main
+   git push origin vX.Y.Z
    ```
 
 Что делает workflow:

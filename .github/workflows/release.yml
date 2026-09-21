@@ -3,7 +3,7 @@ name: Release
 # Релиз запускается пушем тега вида vX.Y.Z:
 #
 #   git tag -a v0.3.0 -m "WorkWatcher 0.3.0"
-#   git push WorkWatcher v0.3.0
+#   git push origin v0.3.0
 #
 # Тег обязан совпадать с WW_VERSION_STRING в include/workwatcher/version.h,
 # иначе сборка падает до публикации. Описание релиза берётся из раздела

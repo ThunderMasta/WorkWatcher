@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Removed
+- `DSH-Web.command`: запуск веб-интерфейса вынесен из репозитория в отдельное
+  приложение macOS. Из терминала — `npx @deepseek-ai/dsh web`.
+
 ## [0.3.0] — 2026-09-22
 
 ### Added

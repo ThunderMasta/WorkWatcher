@@ -46,18 +46,22 @@ typedef struct ww_mouse_info {
  * Правила:
  *  - нажатие мыши внутри @p quit_rect (если не NULL) → ::WW_INPUT_QUIT;
  *  - нажатие мыши вне кнопки → ::WW_INPUT_TOGGLE;
- *  - отпускание, прокрутка и движение → ::WW_INPUT_NONE, но координаты
- *    пишутся в @p mouse_out (для подсветки кнопки);
+ *  - отпускание, прокрутка и движение → ::WW_INPUT_NONE, координаты в
+ *    @p mouse_out;
+ *  - неполный CSI мыши в конце буфера не считается клавишей (NONE),
+ *    @p consumed указывает начало незавершённой последовательности;
  *  - любой другой байт (клавиша) → ::WW_INPUT_TOGGLE;
  *  - пустой ввод → ::WW_INPUT_NONE.
  *  QUIT имеет приоритет над TOGGLE в одной порции.
  *
- * @param buf       Байты ввода; может быть NULL, если @p len равен 0.
- * @param len       Число байт.
- * @param quit_rect Зона кнопки «Выход» или NULL.
- * @param mouse_out Куда записать последнюю позицию мыши; может быть NULL.
+ * @param buf         Байты ввода; может быть NULL, если @p len равен 0.
+ * @param len         Число байт.
+ * @param quit_rect   Зона кнопки «Выход» или NULL.
+ * @param mouse_out   Куда записать последнюю позицию мыши; может быть NULL.
+ * @param consumed    Сколько байт обработано (хвост можно оставить в буфере);
+ *                    может быть NULL (= весь @p len, если нет обрыва мыши).
  */
 ww_input_event_t ww_input_parse(const unsigned char *buf, size_t len, const ww_rect_t *quit_rect,
-                                ww_mouse_info_t *mouse_out);
+                                ww_mouse_info_t *mouse_out, size_t *consumed);
 
 #endif /* WORKWATCHER_INPUT_H */

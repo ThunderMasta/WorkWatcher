@@ -13,11 +13,10 @@
 /* Длина X10-отчёта: ESC [ M Cb Cx Cy. */
 #define X10_REPORT_LEN 6U
 
-/* Результат разбора одного отчёта мыши. */
 typedef struct mouse_report {
     size_t length;
     bool is_press;
-    int col; /* 1-based */
+    int col;
     int row;
 } mouse_report_t;
 
@@ -106,16 +105,53 @@ static bool parse_x10_mouse(const unsigned char *buf, size_t len, size_t pos, mo
     return true;
 }
 
+/* Префикс SGR/X10 без финального байта — ждём догрузки, не считаем клавишей. */
+static bool is_incomplete_mouse(const unsigned char *buf, size_t len, size_t pos)
+{
+    if (pos >= len || buf[pos] != ASCII_ESC) {
+        return false;
+    }
+    if (pos + 1 >= len) {
+        return true; /* одиночный ESC в конце — тоже ждём хвост */
+    }
+    if (buf[pos + 1] != '[') {
+        return false;
+    }
+    if (pos + 2 >= len) {
+        return true;
+    }
+
+    if (buf[pos + 2] == '<') {
+        size_t i = pos + 3;
+        while (i < len && buf[i] != 'M' && buf[i] != 'm') {
+            ++i;
+        }
+        return i >= len;
+    }
+
+    if (buf[pos + 2] == 'M') {
+        return (len - pos) < X10_REPORT_LEN;
+    }
+
+    return false;
+}
+
 ww_input_event_t ww_input_parse(const unsigned char *buf, size_t len, const ww_rect_t *quit_rect,
-                                ww_mouse_info_t *mouse_out)
+                                ww_mouse_info_t *mouse_out, size_t *consumed)
 {
     if (mouse_out != NULL) {
         mouse_out->present = 0;
         mouse_out->col = 0;
         mouse_out->row = 0;
     }
+    if (consumed != NULL) {
+        *consumed = len;
+    }
 
     if (buf == NULL || len == 0) {
+        if (consumed != NULL) {
+            *consumed = 0;
+        }
         return WW_INPUT_NONE;
     }
 
@@ -141,9 +177,19 @@ ww_input_event_t ww_input_parse(const unsigned char *buf, size_t len, const ww_r
             continue;
         }
 
-        /* Клавиша (включая Ctrl+C): только переключение режима. Выход — кнопка. */
+        if (is_incomplete_mouse(buf, len, i)) {
+            if (consumed != NULL) {
+                *consumed = i;
+            }
+            break;
+        }
+
         toggle = true;
         ++i;
+    }
+
+    if (consumed != NULL && i >= len) {
+        *consumed = len;
     }
 
     if (quit) {

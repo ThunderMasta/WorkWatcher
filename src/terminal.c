@@ -9,7 +9,7 @@
  * Отключение отчётов мыши на случай аварийного выхода без endwin().
  * На обычном пути мышь включает/выключает ncurses (mousemask).
  */
-#define MOUSE_DISABLE "\033[?1006l\033[?1000l"
+#define MOUSE_DISABLE "\033[?1006l\033[?1003l\033[?1000l"
 
 #define SIGNAL_EXIT_BASE 128
 

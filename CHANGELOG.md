@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-11-26
+
 ### Changed
 - Отрисовка экрана переведена на **ncurses**: центрированное окно в стиле
   DOS/Turbo Vision (синий фон, рамка, тень, бирюзовый заголовок и статус,
@@ -22,6 +24,7 @@
 - `terminal` отвечает только за prepare (TTY + сохранённый termios) и
   async-signal-safe restore; убраны dual-raw/`reassert`, `read_input` и
   `clear_screen`.
+- `WorkWatcher.command`: тихий запуск без лишнего вывода в терминал.
 
 ### Removed
 - `DSH-Web.command`: запуск веб-интерфейса вынесен из репозитория в отдельное
@@ -97,7 +100,8 @@
   часов.
 - Отрисовка без мерцания; восстановление терминала по сигналам.
 
-[Unreleased]: https://github.com/ThunderMasta/WorkWatcher/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ThunderMasta/WorkWatcher/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ThunderMasta/WorkWatcher/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ThunderMasta/WorkWatcher/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ThunderMasta/WorkWatcher/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ThunderMasta/WorkWatcher/releases/tag/v0.1.0

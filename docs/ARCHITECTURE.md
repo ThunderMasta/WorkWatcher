@@ -76,9 +76,9 @@ config ◄── (все модули, только макросы)
 
 Рабочий путь: `ww_ui_poll_input` — `select`/`read` + `ww_input_parse`
 с hit-box кнопки «Выход» (SGR/X10, координаты 1-based). Клик по кнопке →
-`QUIT`, иначе press мыши или клавиша → `TOGGLE`. Без `getch` (после `raw()`
-на macOS зависает на CSI). Мышь включается `mousemask`, байты читает наш
-`read`. Парсер покрыт тестами в `tests/test_input.c`.
+`QUIT`, иначе press мыши или клавиша → `TOGGLE`. Движение мыши (режим 1003)
+обновляет hover: стиль кнопки и OSC 22 (`default` / `pointer`). Без `getch`.
+Парсер покрыт тестами в `tests/test_input.c`.
 
 ### Подготовка терминала и сигналы
 

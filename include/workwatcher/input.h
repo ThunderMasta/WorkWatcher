@@ -31,20 +31,33 @@ typedef struct ww_rect {
 } ww_rect_t;
 
 /**
- * @brief Разбирает порцию ввода, пришедшую за одно нажатие.
+ * Последняя позиция мыши из порции ввода (для hover).
+ * Координаты 1-based, как в SGR/X10.
+ */
+typedef struct ww_mouse_info {
+    int present; /**< 1, если в порции был хотя бы один отчёт мыши. */
+    int col;
+    int row;
+} ww_mouse_info_t;
+
+/**
+ * @brief Разбирает порцию ввода, пришедшую за одно нажатие / движение.
  *
  * Правила:
  *  - нажатие мыши внутри @p quit_rect (если не NULL) → ::WW_INPUT_QUIT;
  *  - нажатие мыши вне кнопки → ::WW_INPUT_TOGGLE;
- *  - отпускание, прокрутка и движение мыши игнорируются;
- *  - любой другой байт (клавиша, в т. ч. Ctrl+C) → ::WW_INPUT_TOGGLE;
+ *  - отпускание, прокрутка и движение → ::WW_INPUT_NONE, но координаты
+ *    пишутся в @p mouse_out (для подсветки кнопки);
+ *  - любой другой байт (клавиша) → ::WW_INPUT_TOGGLE;
  *  - пустой ввод → ::WW_INPUT_NONE.
  *  QUIT имеет приоритет над TOGGLE в одной порции.
  *
  * @param buf       Байты ввода; может быть NULL, если @p len равен 0.
  * @param len       Число байт.
- * @param quit_rect Зона кнопки «Выход» или NULL (тогда мышь не даёт QUIT).
+ * @param quit_rect Зона кнопки «Выход» или NULL.
+ * @param mouse_out Куда записать последнюю позицию мыши; может быть NULL.
  */
-ww_input_event_t ww_input_parse(const unsigned char *buf, size_t len, const ww_rect_t *quit_rect);
+ww_input_event_t ww_input_parse(const unsigned char *buf, size_t len, const ww_rect_t *quit_rect,
+                                ww_mouse_info_t *mouse_out);
 
 #endif /* WORKWATCHER_INPUT_H */

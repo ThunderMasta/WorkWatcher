@@ -39,12 +39,20 @@
 #define PAIR_ACTIVE  4
 #define PAIR_IDLE    5
 #define PAIR_STATUS  6
-#define PAIR_SHADOW  7
-#define PAIR_BUTTON  8
+#define PAIR_SHADOW       7
+#define PAIR_BUTTON       8
+#define PAIR_BUTTON_HOVER 9
+
+/* OSC 22: форма указателя мыши (CSS). Поддерживают kitty/WezTerm/foot и др.;
+   Terminal.app может игнорировать — тогда остаётся смена стиля кнопки. */
+#define OSC_POINTER_ARROW "\033]22;default\007"
+#define OSC_POINTER_HAND  "\033]22;pointer\007"
 
 static int g_ui_active = 0;
 static int g_colors = 0;
 static int g_exit_hit_valid = 0;
+static int g_exit_hovered = 0;
+static int g_pointer_is_hand = 0;
 static ww_rect_t g_exit_hit;
 
 /* Возвращает длину результата snprintf, ограниченную размером буфера. */
@@ -133,6 +141,36 @@ static void setup_colors(void)
     init_pair(PAIR_STATUS, COLOR_BLACK, COLOR_CYAN);
     init_pair(PAIR_SHADOW, COLOR_BLACK, COLOR_BLACK);
     init_pair(PAIR_BUTTON, COLOR_BLACK, COLOR_WHITE);
+    init_pair(PAIR_BUTTON_HOVER, COLOR_BLACK, COLOR_YELLOW);
+}
+
+static void apply_pointer_shape(int hand)
+{
+    if (hand == g_pointer_is_hand) {
+        return;
+    }
+    g_pointer_is_hand = hand;
+    const char *seq = hand ? OSC_POINTER_HAND : OSC_POINTER_ARROW;
+    (void)write(STDOUT_FILENO, seq, strlen(seq));
+}
+
+static int exit_button_contains(int col, int row)
+{
+    if (!g_exit_hit_valid || col <= 0 || row <= 0) {
+        return 0;
+    }
+    return col >= g_exit_hit.col_min && col <= g_exit_hit.col_max && row >= g_exit_hit.row_min &&
+           row <= g_exit_hit.row_max;
+}
+
+static void update_exit_hover(int col, int row)
+{
+    int hovered = exit_button_contains(col, row);
+    if (hovered == g_exit_hovered) {
+        return;
+    }
+    g_exit_hovered = hovered;
+    apply_pointer_shape(hovered);
 }
 
 ww_status_t ww_ui_init(void)
@@ -156,13 +194,17 @@ ww_status_t ww_ui_init(void)
     leaveok(stdscr, FALSE);
     flushinp();
 
-    /* Мышь через ncurses output; байты забирает наш read. */
-    mousemask((mmask_t)(BUTTON1_PRESSED | BUTTON2_PRESSED | BUTTON3_PRESSED), NULL);
+    /* Press + движение без кнопки (1003) для hover; байты читаем сами. */
+    mousemask((mmask_t)(BUTTON1_PRESSED | BUTTON2_PRESSED | BUTTON3_PRESSED |
+                        REPORT_MOUSE_POSITION),
+              NULL);
     mouseinterval(0);
 
     setup_colors();
+    apply_pointer_shape(0);
 
     g_exit_hit_valid = 0;
+    g_exit_hovered = 0;
     g_ui_active = 1;
     return WW_OK;
 }
@@ -172,11 +214,13 @@ void ww_ui_shutdown(void)
     if (!g_ui_active) {
         return;
     }
+    apply_pointer_shape(0);
     mousemask((mmask_t)0, NULL);
     endwin();
     g_ui_active = 0;
     g_colors = 0;
     g_exit_hit_valid = 0;
+    g_exit_hovered = 0;
 }
 
 static void set_pair(int pair)
@@ -290,8 +334,15 @@ static void draw_mode_line(int y, int x, const char *label, const char *value, i
 static void draw_exit_button(int y, int x)
 {
     const int width = (int)utf8_cols(EXIT_LABEL);
+    const int pair = g_exit_hovered ? PAIR_BUTTON_HOVER : PAIR_BUTTON;
 
-    set_pair(PAIR_BUTTON);
+    if (g_colors) {
+        attr_t attrs = (attr_t)COLOR_PAIR(pair);
+        if (g_exit_hovered) {
+            attrs |= (attr_t)A_BOLD;
+        }
+        wattrset(stdscr, (int)attrs);
+    }
     mvaddstr(y, x, EXIT_LABEL);
 
     /* SGR/X10: колонки и строки с 1. ncurses — с 0. */
@@ -432,7 +483,13 @@ ww_input_event_t ww_ui_poll_input(long timeout_us)
         len += (size_t)n;
     }
 
-    return ww_input_parse(buf, len, g_exit_hit_valid ? &g_exit_hit : NULL);
+    ww_mouse_info_t mouse;
+    ww_input_event_t event =
+        ww_input_parse(buf, len, g_exit_hit_valid ? &g_exit_hit : NULL, &mouse);
+    if (mouse.present) {
+        update_exit_hover(mouse.col, mouse.row);
+    }
+    return event;
 }
 
 void ww_ui_print_summary(const ww_tracker_t *tracker)

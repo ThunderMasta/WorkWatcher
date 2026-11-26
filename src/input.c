@@ -17,7 +17,7 @@
 typedef struct mouse_report {
     size_t length;
     bool is_press;
-    int col; /* 1-based, 0 если неизвестно */
+    int col; /* 1-based */
     int row;
 } mouse_report_t;
 
@@ -40,10 +40,6 @@ static bool rect_contains(const ww_rect_t *rect, int col, int row)
            row <= rect->row_max;
 }
 
-/*
- * Пытается разобрать SGR-отчёт мыши `ESC [ < Cb ; Cx ; Cy (M|m)` с позиции
- * pos. Возвращает true, если отчёт распознан полностью (тогда заполняет out).
- */
 static bool parse_sgr_mouse(const unsigned char *buf, size_t len, size_t pos, mouse_report_t *out)
 {
     if (pos + 3 > len || buf[pos] != ASCII_ESC || buf[pos + 1] != '[' || buf[pos + 2] != '<') {
@@ -93,9 +89,6 @@ static bool parse_sgr_mouse(const unsigned char *buf, size_t len, size_t pos, mo
     return true;
 }
 
-/*
- * Пытается разобрать X10-отчёт мыши `ESC [ M Cb Cx Cy` с позиции pos.
- */
 static bool parse_x10_mouse(const unsigned char *buf, size_t len, size_t pos, mouse_report_t *out)
 {
     if (pos + X10_REPORT_LEN > len || buf[pos] != ASCII_ESC || buf[pos + 1] != '[' ||
@@ -113,8 +106,15 @@ static bool parse_x10_mouse(const unsigned char *buf, size_t len, size_t pos, mo
     return true;
 }
 
-ww_input_event_t ww_input_parse(const unsigned char *buf, size_t len, const ww_rect_t *quit_rect)
+ww_input_event_t ww_input_parse(const unsigned char *buf, size_t len, const ww_rect_t *quit_rect,
+                                ww_mouse_info_t *mouse_out)
 {
+    if (mouse_out != NULL) {
+        mouse_out->present = 0;
+        mouse_out->col = 0;
+        mouse_out->row = 0;
+    }
+
     if (buf == NULL || len == 0) {
         return WW_INPUT_NONE;
     }
@@ -125,6 +125,11 @@ ww_input_event_t ww_input_parse(const unsigned char *buf, size_t len, const ww_r
     while (i < len) {
         mouse_report_t report;
         if (parse_sgr_mouse(buf, len, i, &report) || parse_x10_mouse(buf, len, i, &report)) {
+            if (mouse_out != NULL) {
+                mouse_out->present = 1;
+                mouse_out->col = report.col;
+                mouse_out->row = report.row;
+            }
             if (report.is_press) {
                 if (rect_contains(quit_rect, report.col, report.row)) {
                     quit = true;

@@ -1,7 +1,6 @@
 #include "workwatcher/app.h"
 
 #include "workwatcher/config.h"
-#include "workwatcher/input.h"
 #include "workwatcher/terminal.h"
 #include "workwatcher/ui.h"
 
@@ -19,7 +18,6 @@ void ww_app_init(ww_app_t *app)
  */
 static ww_input_event_t run_phase(ww_app_t *app)
 {
-    unsigned char input[WW_INPUT_BUFFER_SIZE];
     double phase_start = ww_clock_monotonic_seconds();
     ww_input_event_t event = WW_INPUT_NONE;
 
@@ -27,9 +25,7 @@ static ww_input_event_t run_phase(ww_app_t *app)
         double phase_elapsed = ww_clock_monotonic_seconds() - phase_start;
         ww_tracker_t projected = ww_tracker_project(&app->tracker, app->mode, phase_elapsed);
         ww_ui_render(&projected, app->mode, ww_stable_clock_now(&app->clock));
-
-        size_t len = ww_terminal_read_input(input, sizeof input, WW_REFRESH_INTERVAL_US);
-        event = ww_input_parse(input, len);
+        event = ww_ui_poll_input(WW_REFRESH_INTERVAL_US);
     }
 
     ww_tracker_accumulate(&app->tracker, app->mode, ww_clock_monotonic_seconds() - phase_start);
@@ -46,8 +42,8 @@ void ww_app_run(ww_app_t *app)
         app->mode = ww_mode_next(app->mode);
     }
 
-    /* Сначала снимаем ncurses, затем raw-режим — иначе сводка попадёт
-       в альтернативный экран и исчезнет при выходе. */
+    /* Сначала снимаем ncurses, затем аварийный restore termios — иначе
+       сводка попадёт в альтернативный экран. */
     ww_ui_shutdown();
     ww_terminal_restore();
     ww_ui_print_summary(&app->tracker);

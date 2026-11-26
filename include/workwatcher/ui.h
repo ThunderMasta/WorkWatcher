@@ -1,11 +1,10 @@
 /**
  * @file ui.h
- * @brief Форматирование и отрисовка кадра в стиле DOS через ncurses.
+ * @brief Форматирование, DOS-окно на ncurses и опрос ввода.
  *
- * Функции форматирования чистые (не обращаются к часам и терминалу) и
- * покрыты юнит-тестами; ww_ui_render() собирает их результат и рисует
- * окно. Ввод по-прежнему читается модулем terminal/input — ncurses
- * используется только для вывода.
+ * Функции форматирования чистые и покрыты юнит-тестами. Отрисовка — ncurses
+ * (WINDOW, raw). Ввод — select/read + ww_input_parse (getch/mousemask после
+ * raw() на части платформ блокируют цикл перерисовки).
  */
 
 #ifndef WORKWATCHER_UI_H
@@ -13,6 +12,7 @@
 
 #include <stddef.h>
 
+#include "workwatcher/input.h"
 #include "workwatcher/status.h"
 #include "workwatcher/tracker.h"
 
@@ -53,25 +53,23 @@ size_t ww_ui_format_duration(double seconds, char *buf, size_t size);
 size_t ww_ui_format_finish_line(double work_seconds, double now_realtime, char *buf, size_t size);
 
 /**
- * @brief Инициализирует ncurses и цветовую схему DOS.
+ * @brief Инициализирует ncurses: raw-режим, мышь, цвета, окна.
  *
- * Вызывать после ww_terminal_enter_raw_mode(); затем —
- * ww_terminal_reassert(), потому что initscr() может сбросить termios
- * и отчёты мыши. Идемпотентна.
+ * Вызывать после ww_terminal_prepare(). Идемпотентна.
  *
  * @return ::WW_OK либо код ошибки.
  */
 ww_status_t ww_ui_init(void);
 
 /**
- * @brief Завершает работу ncurses (endwin).
+ * @brief Завершает работу ncurses (endwin), уничтожает окна.
  *
  * Идемпотентна; допустимо вызывать из atexit() и перед печатью сводки.
  */
 void ww_ui_shutdown(void);
 
 /**
- * @brief Отрисовывает DOS-окно поверх предыдущего кадра.
+ * @brief Отрисовывает DOS-окно на stdscr.
  *
  * @param projected    Состояние с учётом незавершённой фазы,
  *                     см. ww_tracker_project().
@@ -81,7 +79,14 @@ void ww_ui_shutdown(void);
 void ww_ui_render(const ww_tracker_t *projected, ww_mode_t active, double now_realtime);
 
 /**
- * @brief Печатает итоговую сводку в обычном (не raw) режиме терминала.
+ * @brief Ждёт ввод не дольше @p timeout_us и возвращает событие.
+ *
+ * Ждёт через select(), читает stdin и разбирает ww_input_parse().
+ */
+ww_input_event_t ww_ui_poll_input(long timeout_us);
+
+/**
+ * @brief Печатает итоговую сводку в обычном режиме терминала.
  *
  * Вызывать после ww_ui_shutdown() и ww_terminal_restore().
  */

@@ -66,7 +66,7 @@ int main(int argc, char **argv)
     /* До ncurses: иначе ширина кириллицы считается неверно. */
     setlocale(LC_ALL, "");
 
-    ww_status_t status = ww_terminal_enter_raw_mode();
+    ww_status_t status = ww_terminal_prepare();
     if (status != WW_OK) {
         fprintf(stderr, "Не удалось настроить терминал: %s\n", ww_status_describe(status));
         return EXIT_FAILURE;
@@ -81,9 +81,6 @@ int main(int argc, char **argv)
     }
     /* atexit — LIFO: сначала endwin, затем восстановление termios. */
     atexit(ww_ui_shutdown);
-
-    /* initscr() мог сбросить raw-режим и отчёты мыши. */
-    ww_terminal_reassert();
 
     ww_app_t app;
     ww_app_init(&app);

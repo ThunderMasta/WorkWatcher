@@ -38,8 +38,12 @@
 #define PAIR_STATUS  6
 #define PAIR_SHADOW  7
 
+#define CTRL_C 0x03
+
 static int g_ui_active = 0;
 static int g_colors = 0;
+static WINDOW *g_frame = NULL;
+static WINDOW *g_shadow = NULL;
 
 /* Возвращает длину результата snprintf, ограниченную размером буфера. */
 static size_t clamp_length(int written, size_t size)
@@ -128,6 +132,18 @@ static void setup_colors(void)
     init_pair(PAIR_SHADOW, COLOR_BLACK, COLOR_BLACK);
 }
 
+static void destroy_windows(void)
+{
+    if (g_frame != NULL) {
+        delwin(g_frame);
+        g_frame = NULL;
+    }
+    if (g_shadow != NULL) {
+        delwin(g_shadow);
+        g_shadow = NULL;
+    }
+}
+
 ww_status_t ww_ui_init(void)
 {
     if (g_ui_active) {
@@ -141,13 +157,21 @@ ww_status_t ww_ui_init(void)
         return WW_ERR_TERMINAL_IO;
     }
 
-    cbreak();
+    /* raw: без ISIG, Ctrl+C приходит как символ 0x03, как раньше. */
+    raw();
     noecho();
     nonl();
     curs_set(0);
-    leaveok(stdscr, TRUE);
-    keypad(stdscr, FALSE);
+    keypad(stdscr, TRUE);
     meta(stdscr, TRUE);
+    leaveok(stdscr, TRUE);
+    flushinp();
+
+    /* Только нажатия кнопок; отпускание/колесо/движение отфильтруем ещё и
+       в getmouse на случай расширенных отчётов терминала. */
+    mousemask((mmask_t)(BUTTON1_PRESSED | BUTTON2_PRESSED | BUTTON3_PRESSED), NULL);
+    mouseinterval(0);
+
     setup_colors();
 
     g_ui_active = 1;
@@ -159,67 +183,31 @@ void ww_ui_shutdown(void)
     if (!g_ui_active) {
         return;
     }
+    destroy_windows();
+    /* Снимаем мышь до endwin, чтобы терминал не продолжал слать отчёты. */
+    mousemask((mmask_t)0, NULL);
     endwin();
     g_ui_active = 0;
     g_colors = 0;
 }
 
-static void set_pair(int pair)
+static void set_pair_win(WINDOW *win, int pair)
 {
     if (g_colors) {
-        attrset(COLOR_PAIR(pair));
-    }
-}
-
-static void fill_rect(int y, int x, int h, int w, int pair, chtype ch)
-{
-    set_pair(pair);
-    for (int row = 0; row < h; ++row) {
-        for (int col = 0; col < w; ++col) {
-            mvaddch(y + row, x + col, ch);
-        }
-    }
-}
-
-static void draw_box(int top, int left, int h, int w, int pair)
-{
-    set_pair(pair);
-
-    mvaddch(top, left, ACS_ULCORNER);
-    mvaddch(top, left + w - 1, ACS_URCORNER);
-    mvaddch(top + h - 1, left, ACS_LLCORNER);
-    mvaddch(top + h - 1, left + w - 1, ACS_LRCORNER);
-
-    for (int col = 1; col < w - 1; ++col) {
-        mvaddch(top, left + col, ACS_HLINE);
-        mvaddch(top + h - 1, left + col, ACS_HLINE);
-    }
-    for (int row = 1; row < h - 1; ++row) {
-        mvaddch(top + row, left, ACS_VLINE);
-        mvaddch(top + row, left + w - 1, ACS_VLINE);
-    }
-}
-
-static void draw_hline_tee(int y, int left, int w, int pair)
-{
-    set_pair(pair);
-    mvaddch(y, left, ACS_LTEE);
-    mvaddch(y, left + w - 1, ACS_RTEE);
-    for (int col = 1; col < w - 1; ++col) {
-        mvaddch(y, left + col, ACS_HLINE);
+        wattrset(win, (int)COLOR_PAIR(pair));
     }
 }
 
 /* Пишет текст в pair, обрезая по экранным колонкам; остаток забивает пробелами. */
-static void put_clipped(int y, int x, int width, int pair, const char *text)
+static void put_clipped_win(WINDOW *win, int y, int x, int width, int pair, const char *text)
 {
-    set_pair(pair);
-    move(y, x);
+    set_pair_win(win, pair);
+    wmove(win, y, x);
     for (int i = 0; i < width; ++i) {
-        addch(' ');
+        waddch(win, ' ');
     }
 
-    move(y, x);
+    wmove(win, y, x);
     size_t cols = 0;
     mbstate_t st;
     memset(&st, 0, sizeof st);
@@ -241,13 +229,13 @@ static void put_clipped(int y, int x, int width, int pair, const char *text)
         if (cols + (size_t)w > (size_t)width) {
             break;
         }
-        addnstr(s, (int)n);
+        waddnstr(win, s, (int)n);
         cols += (size_t)w;
         s += n;
     }
 }
 
-static void draw_title(int top, int left, int w, const char *title)
+static void draw_title(WINDOW *win, int w, const char *title)
 {
     int inner = w - 2;
     size_t title_cols = utf8_cols(title);
@@ -256,25 +244,74 @@ static void draw_title(int top, int left, int w, const char *title)
     }
     int pad = (inner - (int)title_cols) / 2;
 
-    set_pair(PAIR_TITLE);
-    move(top, left + 1);
+    set_pair_win(win, PAIR_TITLE);
+    wmove(win, 0, 1);
     for (int i = 0; i < inner; ++i) {
-        addch(' ');
+        waddch(win, ' ');
     }
-
-    /* Обрезаем по колонкам тем же хелпером, сдвиг — pad. */
-    put_clipped(top, left + 1 + pad, inner - pad, PAIR_TITLE, title);
+    put_clipped_win(win, 0, 1 + pad, inner - pad, PAIR_TITLE, title);
 }
 
-static void draw_mode_line(int y, int x, const char *label, const char *value, int active)
+static void draw_hline_tee(WINDOW *win, int y, int w, int pair)
+{
+    set_pair_win(win, pair);
+    mvwaddch(win, y, 0, ACS_LTEE);
+    mvwaddch(win, y, w - 1, ACS_RTEE);
+    mvwhline(win, y, 1, ACS_HLINE, w - 2);
+}
+
+static void draw_mode_line(WINDOW *win, int y, int x, const char *label, const char *value,
+                           int active)
 {
     int pair = active ? PAIR_ACTIVE : PAIR_IDLE;
     const char *mark = active ? ">" : " ";
 
-    set_pair(pair);
-    mvaddstr(y, x, mark);
-    mvaddstr(y, x + 2, label);
-    mvaddstr(y, x + 10, value);
+    set_pair_win(win, pair);
+    mvwaddstr(win, y, x, mark);
+    mvwaddstr(win, y, x + 2, label);
+    mvwaddstr(win, y, x + 10, value);
+}
+
+/* Создаёт или перемещает WINDOW рамки и тени под текущий размер терминала.
+   Возвращает 0 при успехе, -1 если терминал слишком мал (рисуем fallback). */
+static int ensure_windows(int max_y, int max_x)
+{
+    if (max_y < WIN_H + 1 || max_x < WIN_W + 1) {
+        destroy_windows();
+        return -1;
+    }
+
+    int top = (max_y - WIN_H) / 2;
+    int left = (max_x - WIN_W) / 2;
+
+    if (g_frame == NULL) {
+        g_frame = newwin(WIN_H, WIN_W, top, left);
+    } else {
+        mvwin(g_frame, top, left);
+        wresize(g_frame, WIN_H, WIN_W);
+    }
+    if (g_frame == NULL) {
+        return -1;
+    }
+
+    int have_shadow = (top + WIN_H < max_y) && (left + WIN_W < max_x);
+    if (have_shadow) {
+        if (g_shadow == NULL) {
+            g_shadow = newwin(WIN_H, WIN_W, top + 1, left + 1);
+        } else {
+            mvwin(g_shadow, top + 1, left + 1);
+            wresize(g_shadow, WIN_H, WIN_W);
+        }
+        if (g_shadow == NULL) {
+            destroy_windows();
+            return -1;
+        }
+    } else if (g_shadow != NULL) {
+        delwin(g_shadow);
+        g_shadow = NULL;
+    }
+
+    return 0;
 }
 
 void ww_ui_render(const ww_tracker_t *projected, ww_mode_t active, double now_realtime)
@@ -302,53 +339,108 @@ void ww_ui_render(const ww_tracker_t *projected, ww_mode_t active, double now_re
     int max_x = 0;
     getmaxyx(stdscr, max_y, max_x);
 
-    erase();
-
     if (g_colors) {
-        bkgdset(COLOR_PAIR(PAIR_DESKTOP) | (chtype)' ');
-        bkgd(COLOR_PAIR(PAIR_DESKTOP) | (chtype)' ');
+        wbkgd(stdscr, COLOR_PAIR(PAIR_DESKTOP) | (chtype)' ');
     }
+    werase(stdscr);
 
-    if (max_y < WIN_H + 1 || max_x < WIN_W + 1) {
-        put_clipped(0, 0, max_x > 0 ? max_x : 0, PAIR_WINDOW, title);
+    if (ensure_windows(max_y, max_x) != 0) {
+        /* Узкий терминал: без рамки, прямо на stdscr. */
+        put_clipped_win(stdscr, 0, 0, max_x > 0 ? max_x : 0, PAIR_WINDOW, title);
         if (max_y > 1) {
-            put_clipped(1, 0, max_x, PAIR_ACTIVE, work_buf);
+            put_clipped_win(stdscr, 1, 0, max_x, PAIR_ACTIVE, work_buf);
         }
         if (max_y > 2) {
-            put_clipped(2, 0, max_x, PAIR_WINDOW, finish_buf);
+            put_clipped_win(stdscr, 2, 0, max_x, PAIR_WINDOW, finish_buf);
         }
-        refresh();
+        wnoutrefresh(stdscr);
+        doupdate();
         return;
     }
 
-    int top = (max_y - WIN_H) / 2;
-    int left = (max_x - WIN_W) / 2;
-
-    /* Тень справа и снизу — типичный приём DOS/Turbo Vision. */
-    if (top + WIN_H < max_y && left + WIN_W < max_x) {
-        fill_rect(top + 1, left + WIN_W, WIN_H, 1, PAIR_SHADOW, ACS_CKBOARD);
-        fill_rect(top + WIN_H, left + 1, 1, WIN_W, PAIR_SHADOW, ACS_CKBOARD);
+    if (g_shadow != NULL) {
+        if (g_colors) {
+            wbkgd(g_shadow, COLOR_PAIR(PAIR_SHADOW) | ACS_CKBOARD);
+        } else {
+            wbkgd(g_shadow, ACS_CKBOARD);
+        }
+        werase(g_shadow);
     }
 
-    fill_rect(top, left, WIN_H, WIN_W, PAIR_WINDOW, ' ');
-    draw_box(top, left, WIN_H, WIN_W, PAIR_WINDOW);
-    draw_title(top, left, WIN_W, title);
-    draw_hline_tee(top + 1, left, WIN_W, PAIR_WINDOW);
+    if (g_colors) {
+        wbkgd(g_frame, COLOR_PAIR(PAIR_WINDOW) | (chtype)' ');
+    }
+    werase(g_frame);
+    set_pair_win(g_frame, PAIR_WINDOW);
+    box(g_frame, 0, 0);
 
-    int cx = left + 2;
-    draw_mode_line(top + 2, cx, LABEL_WORK, work_buf, active == WW_MODE_WORK);
-    draw_mode_line(top + 3, cx, LABEL_HOME, home_buf, active == WW_MODE_HOME);
-    put_clipped(top + 5, cx, WIN_W - 4, PAIR_WINDOW, finish_buf);
+    draw_title(g_frame, WIN_W, title);
+    draw_hline_tee(g_frame, 1, WIN_W, PAIR_WINDOW);
 
-    draw_hline_tee(top + WIN_H - 2, left, WIN_W, PAIR_WINDOW);
-    put_clipped(top + WIN_H - 1, left + 1, WIN_W - 2, PAIR_STATUS, HINT_LINE);
+    draw_mode_line(g_frame, 2, 2, LABEL_WORK, work_buf, active == WW_MODE_WORK);
+    draw_mode_line(g_frame, 3, 2, LABEL_HOME, home_buf, active == WW_MODE_HOME);
+    put_clipped_win(g_frame, 5, 2, WIN_W - 4, PAIR_WINDOW, finish_buf);
+
+    draw_hline_tee(g_frame, WIN_H - 2, WIN_W, PAIR_WINDOW);
+    put_clipped_win(g_frame, WIN_H - 1, 1, WIN_W - 2, PAIR_STATUS, HINT_LINE);
 
     /* Углы нижней рамки поверх статусной полосы. */
-    set_pair(PAIR_WINDOW);
-    mvaddch(top + WIN_H - 1, left, ACS_LLCORNER);
-    mvaddch(top + WIN_H - 1, left + WIN_W - 1, ACS_LRCORNER);
+    set_pair_win(g_frame, PAIR_WINDOW);
+    mvwaddch(g_frame, WIN_H - 1, 0, ACS_LLCORNER);
+    mvwaddch(g_frame, WIN_H - 1, WIN_W - 1, ACS_LRCORNER);
 
-    refresh();
+    /* Порядок: стол → тень → рамка (перекрытие даёт видимую тень справа/снизу). */
+    wnoutrefresh(stdscr);
+    if (g_shadow != NULL) {
+        wnoutrefresh(g_shadow);
+    }
+    wnoutrefresh(g_frame);
+    doupdate();
+}
+
+static ww_input_event_t event_from_mouse(void)
+{
+    MEVENT ev;
+    if (getmouse(&ev) != OK) {
+        return WW_INPUT_NONE;
+    }
+
+    const mmask_t press =
+        (mmask_t)(BUTTON1_PRESSED | BUTTON2_PRESSED | BUTTON3_PRESSED);
+    if ((ev.bstate & press) != 0U) {
+        return WW_INPUT_TOGGLE;
+    }
+    return WW_INPUT_NONE;
+}
+
+ww_input_event_t ww_ui_poll_input(long timeout_us)
+{
+    if (!g_ui_active) {
+        return WW_INPUT_NONE;
+    }
+
+    int ms = (int)(timeout_us / 1000L);
+    if (ms < 0) {
+        ms = 0;
+    }
+    timeout(ms);
+
+    int ch = getch();
+    if (ch == ERR) {
+        return WW_INPUT_NONE;
+    }
+    if (ch == CTRL_C) {
+        return WW_INPUT_QUIT;
+    }
+    if (ch == KEY_RESIZE) {
+        return WW_INPUT_NONE;
+    }
+    if (ch == KEY_MOUSE) {
+        return event_from_mouse();
+    }
+
+    /* Любая клавиша, включая KEY_* от keypad. */
+    return WW_INPUT_TOGGLE;
 }
 
 void ww_ui_print_summary(const ww_tracker_t *tracker)

@@ -25,7 +25,8 @@
 #define LABEL_WORK "Работа"
 #define LABEL_HOME "Дом"
 
-#define HINT_LINE "Клавиша/мышь — сменить режим, Ctrl+C — выход"
+#define HINT_LINE  "Клавиша/мышь — сменить режим"
+#define EXIT_LABEL "[ Выход ]"
 
 /* Геометрия окна, включая рамку.
  * 0 заголовок, 1 разделитель, 2–5 контент, 6 разделитель, 7 статус. */
@@ -39,9 +40,12 @@
 #define PAIR_IDLE    5
 #define PAIR_STATUS  6
 #define PAIR_SHADOW  7
+#define PAIR_BUTTON  8
 
 static int g_ui_active = 0;
 static int g_colors = 0;
+static int g_exit_hit_valid = 0;
+static ww_rect_t g_exit_hit;
 
 /* Возвращает длину результата snprintf, ограниченную размером буфера. */
 static size_t clamp_length(int written, size_t size)
@@ -128,6 +132,7 @@ static void setup_colors(void)
     init_pair(PAIR_IDLE, COLOR_CYAN, COLOR_BLUE);
     init_pair(PAIR_STATUS, COLOR_BLACK, COLOR_CYAN);
     init_pair(PAIR_SHADOW, COLOR_BLACK, COLOR_BLACK);
+    init_pair(PAIR_BUTTON, COLOR_BLACK, COLOR_WHITE);
 }
 
 ww_status_t ww_ui_init(void)
@@ -142,7 +147,7 @@ ww_status_t ww_ui_init(void)
         return WW_ERR_TERMINAL_IO;
     }
 
-    /* raw: Ctrl+C → байт 0x03. Ввод — select/read + ww_input_parse (не getch). */
+    /* raw: ISIG выкл. Ввод — select/read + ww_input_parse (не getch). */
     raw();
     noecho();
     nonl();
@@ -157,6 +162,7 @@ ww_status_t ww_ui_init(void)
 
     setup_colors();
 
+    g_exit_hit_valid = 0;
     g_ui_active = 1;
     return WW_OK;
 }
@@ -170,6 +176,7 @@ void ww_ui_shutdown(void)
     endwin();
     g_ui_active = 0;
     g_colors = 0;
+    g_exit_hit_valid = 0;
 }
 
 static void set_pair(int pair)
@@ -279,6 +286,22 @@ static void draw_mode_line(int y, int x, const char *label, const char *value, i
     mvaddstr(y, x + 10, value);
 }
 
+/* Рисует кнопку «Выход» и запоминает hit-box в 1-based координатах мыши. */
+static void draw_exit_button(int y, int x)
+{
+    const int width = (int)utf8_cols(EXIT_LABEL);
+
+    set_pair(PAIR_BUTTON);
+    mvaddstr(y, x, EXIT_LABEL);
+
+    /* SGR/X10: колонки и строки с 1. ncurses — с 0. */
+    g_exit_hit.col_min = x + 1;
+    g_exit_hit.col_max = x + width;
+    g_exit_hit.row_min = y + 1;
+    g_exit_hit.row_max = y + 1;
+    g_exit_hit_valid = 1;
+}
+
 void ww_ui_render(const ww_tracker_t *projected, ww_mode_t active, double now_realtime)
 {
     char work_buf[WW_UI_DURATION_BUFSIZE];
@@ -289,6 +312,8 @@ void ww_ui_render(const ww_tracker_t *projected, ww_mode_t active, double now_re
     if (!g_ui_active || projected == NULL) {
         return;
     }
+
+    g_exit_hit_valid = 0;
 
     double work = ww_tracker_elapsed(projected, WW_MODE_WORK);
     double home = ww_tracker_elapsed(projected, WW_MODE_HOME);
@@ -319,6 +344,10 @@ void ww_ui_render(const ww_tracker_t *projected, ww_mode_t active, double now_re
         if (max_y > 2) {
             put_clipped(2, 0, max_x, PAIR_WINDOW, finish_buf);
         }
+        if (max_y > 3 && max_x >= (int)utf8_cols(EXIT_LABEL)) {
+            draw_exit_button(3, 0);
+        }
+        clearok(stdscr, TRUE);
         refresh();
         return;
     }
@@ -342,11 +371,19 @@ void ww_ui_render(const ww_tracker_t *projected, ww_mode_t active, double now_re
     put_clipped(top + 5, cx, WIN_W - 4, PAIR_WINDOW, finish_buf);
 
     draw_hline_tee(top + WIN_H - 2, left, WIN_W, PAIR_WINDOW);
-    put_clipped(top + WIN_H - 1, left + 1, WIN_W - 2, PAIR_STATUS, HINT_LINE);
+
+    const int status_y = top + WIN_H - 1;
+    const int btn_w = (int)utf8_cols(EXIT_LABEL);
+    const int btn_x = left + WIN_W - 1 - btn_w;
+    const int hint_w = btn_x - (left + 1) - 1;
+    if (hint_w > 0) {
+        put_clipped(status_y, left + 1, hint_w, PAIR_STATUS, HINT_LINE);
+    }
+    draw_exit_button(status_y, btn_x);
 
     set_pair(PAIR_WINDOW);
-    mvaddch(top + WIN_H - 1, left, ACS_LLCORNER);
-    mvaddch(top + WIN_H - 1, left + WIN_W - 1, ACS_LRCORNER);
+    mvaddch(status_y, left, ACS_LLCORNER);
+    mvaddch(status_y, left + WIN_W - 1, ACS_LRCORNER);
 
     /* Каждый кадр — полная отрисовка: иначе после первого refresh ncurses
        может не вытолкнуть смену цифр таймера в физический терминал. */
@@ -395,7 +432,7 @@ ww_input_event_t ww_ui_poll_input(long timeout_us)
         len += (size_t)n;
     }
 
-    return ww_input_parse(buf, len);
+    return ww_input_parse(buf, len, g_exit_hit_valid ? &g_exit_hit : NULL);
 }
 
 void ww_ui_print_summary(const ww_tracker_t *tracker)

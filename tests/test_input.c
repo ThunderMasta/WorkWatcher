@@ -8,12 +8,17 @@
 /* Разбирает строковый литерал (без завершающего нуля). */
 static ww_input_event_t parse_str(const char *s)
 {
-    return ww_input_parse((const unsigned char *)s, strlen(s));
+    return ww_input_parse((const unsigned char *)s, strlen(s), NULL);
+}
+
+static ww_input_event_t parse_str_quit(const char *s, const ww_rect_t *quit)
+{
+    return ww_input_parse((const unsigned char *)s, strlen(s), quit);
 }
 
 WW_TEST(empty_input_is_none)
 {
-    WW_ASSERT_EQ_INT(ww_input_parse(NULL, 0), WW_INPUT_NONE);
+    WW_ASSERT_EQ_INT(ww_input_parse(NULL, 0, NULL), WW_INPUT_NONE);
     WW_ASSERT_EQ_INT(parse_str(""), WW_INPUT_NONE);
 }
 
@@ -32,29 +37,18 @@ WW_TEST(escape_sequences_of_keys_toggle)
     WW_ASSERT_EQ_INT(parse_str("\033OP"), WW_INPUT_TOGGLE);   /* F1 */
 }
 
-WW_TEST(ctrl_c_requests_quit)
+WW_TEST(ctrl_c_toggles_not_quit)
 {
-    WW_ASSERT_EQ_INT(parse_str("\x03"), WW_INPUT_QUIT); /* Ctrl+C */
+    /* Выход только кнопкой «Выход»; Ctrl+C — обычная клавиша. */
+    WW_ASSERT_EQ_INT(parse_str("\x03"), WW_INPUT_TOGGLE);
 }
 
 WW_TEST(other_control_chars_toggle)
 {
-    /* Ctrl+D, Ctrl+Q, Ctrl+\ — обычные клавиши: ISIG отключён, сигналов
-       они не порождают. */
     WW_ASSERT_EQ_INT(parse_str("\x04"), WW_INPUT_TOGGLE);
     WW_ASSERT_EQ_INT(parse_str("\x11"), WW_INPUT_TOGGLE);
     WW_ASSERT_EQ_INT(parse_str("\x1c"), WW_INPUT_TOGGLE);
-    WW_ASSERT_EQ_INT(parse_str("c"), WW_INPUT_TOGGLE); /* без модификатора */
-}
-
-WW_TEST(quit_has_priority_over_toggle)
-{
-    /* Литералы разделены: "\x03a" парсился бы как один байт 0x03A. */
-    WW_ASSERT_EQ_INT(parse_str("a\x03"), WW_INPUT_QUIT);
-    WW_ASSERT_EQ_INT(parse_str("\x03"
-                               "a"),
-                     WW_INPUT_QUIT);
-    WW_ASSERT_EQ_INT(parse_str("\033[<0;10;5M\x03"), WW_INPUT_QUIT);
+    WW_ASSERT_EQ_INT(parse_str("c"), WW_INPUT_TOGGLE);
 }
 
 WW_TEST(sgr_mouse_press_toggles)
@@ -78,8 +72,6 @@ WW_TEST(sgr_mouse_wheel_and_motion_are_ignored)
 
 WW_TEST(sgr_press_and_release_in_one_chunk_toggle_once)
 {
-    /* Одно физическое нажатие даёт press + release; результат — одно
-       переключение. */
     WW_ASSERT_EQ_INT(parse_str("\033[<0;10;5M\033[<0;10;5m"), WW_INPUT_TOGGLE);
 }
 
@@ -97,20 +89,53 @@ WW_TEST(incomplete_sgr_sequence_is_treated_as_key)
 
 WW_TEST(x10_mouse_press_toggles_release_ignored)
 {
-    /* ESC [ M Cb Cx Cy, поля смещены на 32. */
     const unsigned char press[] = {0x1b, '[', 'M', 32 + 0, 32 + 10, 32 + 5};
     const unsigned char release[] = {0x1b, '[', 'M', 32 + 3, 32 + 10, 32 + 5};
     const unsigned char wheel[] = {0x1b, '[', 'M', 32 + 64, 32 + 10, 32 + 5};
 
-    WW_ASSERT_EQ_INT(ww_input_parse(press, sizeof press), WW_INPUT_TOGGLE);
-    WW_ASSERT_EQ_INT(ww_input_parse(release, sizeof release), WW_INPUT_NONE);
-    WW_ASSERT_EQ_INT(ww_input_parse(wheel, sizeof wheel), WW_INPUT_NONE);
+    WW_ASSERT_EQ_INT(ww_input_parse(press, sizeof press, NULL), WW_INPUT_TOGGLE);
+    WW_ASSERT_EQ_INT(ww_input_parse(release, sizeof release, NULL), WW_INPUT_NONE);
+    WW_ASSERT_EQ_INT(ww_input_parse(wheel, sizeof wheel, NULL), WW_INPUT_NONE);
 }
 
 WW_TEST(incomplete_x10_sequence_is_treated_as_key)
 {
     const unsigned char partial[] = {0x1b, '[', 'M', 32 + 0};
-    WW_ASSERT_EQ_INT(ww_input_parse(partial, sizeof partial), WW_INPUT_TOGGLE);
+    WW_ASSERT_EQ_INT(ww_input_parse(partial, sizeof partial, NULL), WW_INPUT_TOGGLE);
+}
+
+WW_TEST(mouse_press_on_quit_rect_requests_quit)
+{
+    const ww_rect_t quit = {.col_min = 40, .col_max = 48, .row_min = 12, .row_max = 12};
+
+    WW_ASSERT_EQ_INT(parse_str_quit("\033[<0;40;12M", &quit), WW_INPUT_QUIT);
+    WW_ASSERT_EQ_INT(parse_str_quit("\033[<0;48;12M", &quit), WW_INPUT_QUIT);
+    WW_ASSERT_EQ_INT(parse_str_quit("\033[<0;44;12M", &quit), WW_INPUT_QUIT);
+}
+
+WW_TEST(mouse_press_outside_quit_edges_toggles)
+{
+    const ww_rect_t quit = {.col_min = 40, .col_max = 48, .row_min = 12, .row_max = 12};
+
+    WW_ASSERT_EQ_INT(parse_str_quit("\033[<0;39;12M", &quit), WW_INPUT_TOGGLE);
+    WW_ASSERT_EQ_INT(parse_str_quit("\033[<0;49;12M", &quit), WW_INPUT_TOGGLE);
+    WW_ASSERT_EQ_INT(parse_str_quit("\033[<0;44;11M", &quit), WW_INPUT_TOGGLE);
+    WW_ASSERT_EQ_INT(parse_str_quit("\033[<0;44;13M", &quit), WW_INPUT_TOGGLE);
+}
+
+WW_TEST(quit_has_priority_over_toggle)
+{
+    const ww_rect_t quit = {.col_min = 40, .col_max = 48, .row_min = 12, .row_max = 12};
+
+    WW_ASSERT_EQ_INT(parse_str_quit("\033[<0;10;5M\033[<0;44;12M", &quit), WW_INPUT_QUIT);
+}
+
+WW_TEST(x10_mouse_press_on_quit_rect_requests_quit)
+{
+    const ww_rect_t quit = {.col_min = 10, .col_max = 18, .row_min = 5, .row_max = 5};
+    const unsigned char press[] = {0x1b, '[', 'M', 32 + 0, 32 + 12, 32 + 5};
+
+    WW_ASSERT_EQ_INT(ww_input_parse(press, sizeof press, &quit), WW_INPUT_QUIT);
 }
 
 void suite_input(void)
@@ -119,9 +144,8 @@ void suite_input(void)
     WW_RUN(empty_input_is_none);
     WW_RUN(plain_key_toggles);
     WW_RUN(escape_sequences_of_keys_toggle);
-    WW_RUN(ctrl_c_requests_quit);
+    WW_RUN(ctrl_c_toggles_not_quit);
     WW_RUN(other_control_chars_toggle);
-    WW_RUN(quit_has_priority_over_toggle);
     WW_RUN(sgr_mouse_press_toggles);
     WW_RUN(sgr_mouse_release_is_ignored);
     WW_RUN(sgr_mouse_wheel_and_motion_are_ignored);
@@ -130,4 +154,8 @@ void suite_input(void)
     WW_RUN(incomplete_sgr_sequence_is_treated_as_key);
     WW_RUN(x10_mouse_press_toggles_release_ignored);
     WW_RUN(incomplete_x10_sequence_is_treated_as_key);
+    WW_RUN(mouse_press_on_quit_rect_requests_quit);
+    WW_RUN(mouse_press_outside_quit_edges_toggles);
+    WW_RUN(quit_has_priority_over_toggle);
+    WW_RUN(x10_mouse_press_on_quit_rect_requests_quit);
 }

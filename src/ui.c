@@ -33,12 +33,12 @@
 #define WIN_W 52
 #define WIN_H 8
 
-#define PAIR_DESKTOP 1
-#define PAIR_WINDOW  2
-#define PAIR_TITLE   3
-#define PAIR_ACTIVE  4
-#define PAIR_IDLE    5
-#define PAIR_STATUS  6
+#define PAIR_DESKTOP      1
+#define PAIR_WINDOW       2
+#define PAIR_TITLE        3
+#define PAIR_ACTIVE       4
+#define PAIR_IDLE         5
+#define PAIR_STATUS       6
 #define PAIR_SHADOW       7
 #define PAIR_BUTTON       8
 #define PAIR_BUTTON_HOVER 9
@@ -152,6 +152,19 @@ static void setup_colors(void)
     init_pair(PAIR_BUTTON_HOVER, COLOR_BLACK, COLOR_YELLOW);
 }
 
+/* Пишет CSI/OSC целиком; ошибки терминала игнорируем (как в terminal.c). */
+static void write_sequence(const char *seq, size_t len)
+{
+    while (len > 0) {
+        ssize_t written = write(STDOUT_FILENO, seq, len);
+        if (written <= 0) {
+            return;
+        }
+        seq += written;
+        len -= (size_t)written;
+    }
+}
+
 static void apply_pointer_shape(int hand)
 {
     if (hand == g_pointer_is_hand) {
@@ -159,7 +172,7 @@ static void apply_pointer_shape(int hand)
     }
     g_pointer_is_hand = hand;
     const char *seq = hand ? OSC_POINTER_HAND : OSC_POINTER_ARROW;
-    (void)write(STDOUT_FILENO, seq, strlen(seq));
+    write_sequence(seq, strlen(seq));
 }
 
 /* Принудительно (даже если уже «default») — после initscr курсор может быть любым. */
@@ -212,7 +225,7 @@ ww_status_t ww_ui_init(void)
     /* ncurses + явный CSI: mousemask один не всегда включает 1003. */
     mousemask((mmask_t)(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION), NULL);
     mouseinterval(0);
-    (void)write(STDOUT_FILENO, MOUSE_ENABLE, sizeof MOUSE_ENABLE - 1);
+    write_sequence(MOUSE_ENABLE, sizeof MOUSE_ENABLE - 1);
 
     setup_colors();
     force_pointer_shape(0);
@@ -230,7 +243,7 @@ void ww_ui_shutdown(void)
         return;
     }
     force_pointer_shape(0);
-    (void)write(STDOUT_FILENO, MOUSE_DISABLE, sizeof MOUSE_DISABLE - 1);
+    write_sequence(MOUSE_DISABLE, sizeof MOUSE_DISABLE - 1);
     mousemask((mmask_t)0, NULL);
     endwin();
     g_ui_active = 0;
@@ -463,7 +476,7 @@ void ww_ui_render(const ww_tracker_t *projected, ww_mode_t active, double now_re
     clearok(stdscr, TRUE);
     refresh();
     /* refresh/endwin могут сбить DECSET мыши — включаем снова для hover. */
-    (void)write(STDOUT_FILENO, MOUSE_ENABLE, sizeof MOUSE_ENABLE - 1);
+    write_sequence(MOUSE_ENABLE, sizeof MOUSE_ENABLE - 1);
 }
 
 static int wait_stdin(long timeout_us)
@@ -505,8 +518,8 @@ ww_input_event_t ww_ui_poll_input(long timeout_us)
 
     ww_mouse_info_t mouse;
     size_t consumed = 0;
-    ww_input_event_t event = ww_input_parse(g_inbuf, g_inlen, g_exit_hit_valid ? &g_exit_hit : NULL,
-                                            &mouse, &consumed);
+    ww_input_event_t event =
+        ww_input_parse(g_inbuf, g_inlen, g_exit_hit_valid ? &g_exit_hit : NULL, &mouse, &consumed);
     if (mouse.present) {
         update_exit_hover(mouse.col, mouse.row);
     }

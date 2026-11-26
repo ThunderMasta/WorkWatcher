@@ -72,9 +72,8 @@ WW_TEST(sgr_motion_fills_mouse_info)
 {
     const char *seq = "\033[<35;44;12M";
     ww_mouse_info_t mouse;
-    WW_ASSERT_EQ_INT(
-        ww_input_parse((const unsigned char *)seq, strlen(seq), NULL, &mouse, NULL),
-        WW_INPUT_NONE);
+    WW_ASSERT_EQ_INT(ww_input_parse((const unsigned char *)seq, strlen(seq), NULL, &mouse, NULL),
+                     WW_INPUT_NONE);
     WW_ASSERT(mouse.present);
     WW_ASSERT_EQ_INT(mouse.col, 44);
     WW_ASSERT_EQ_INT(mouse.row, 12);
@@ -93,8 +92,8 @@ WW_TEST(sgr_release_followed_by_key_toggles)
 WW_TEST(incomplete_sgr_waits_without_toggle)
 {
     size_t consumed = 99;
-    WW_ASSERT_EQ_INT(
-        ww_input_parse((const unsigned char *)"\033[<", 3, NULL, NULL, &consumed), WW_INPUT_NONE);
+    WW_ASSERT_EQ_INT(ww_input_parse((const unsigned char *)"\033[<", 3, NULL, NULL, &consumed),
+                     WW_INPUT_NONE);
     WW_ASSERT_EQ_INT(consumed, 0);
 
     consumed = 99;
@@ -166,9 +165,8 @@ WW_TEST(key_then_incomplete_mouse_consumes_key_only)
 {
     const char *seq = "a\033[<0;1";
     size_t consumed = 0;
-    WW_ASSERT_EQ_INT(
-        ww_input_parse((const unsigned char *)seq, strlen(seq), NULL, NULL, &consumed),
-        WW_INPUT_TOGGLE);
+    WW_ASSERT_EQ_INT(ww_input_parse((const unsigned char *)seq, strlen(seq), NULL, NULL, &consumed),
+                     WW_INPUT_TOGGLE);
     WW_ASSERT_EQ_INT(consumed, 1);
 }
 

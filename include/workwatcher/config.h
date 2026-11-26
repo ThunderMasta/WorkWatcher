@@ -27,4 +27,17 @@
 #define WW_REFRESH_INTERVAL_US 250000L
 #endif
 
+/**
+ * Ожидание «хвоста» одного нажатия, микросекунды: остаток CSI (стрелки,
+ * отчёты мыши) после первого байта, замеченного select().
+ */
+#ifndef WW_KEY_TAIL_US
+#define WW_KEY_TAIL_US 40000L
+#endif
+
+/** Размер буфера для одной порции ввода с терминала, байты. */
+#ifndef WW_INPUT_BUFFER_SIZE
+#define WW_INPUT_BUFFER_SIZE 256U
+#endif
+
 #endif /* WORKWATCHER_CONFIG_H */

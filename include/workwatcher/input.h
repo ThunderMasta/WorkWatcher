@@ -2,9 +2,8 @@
  * @file input.h
  * @brief События ввода и байтовый разбор (для тестов / протокола).
  *
- * Рабочий путь приложения — ww_ui_poll_input() (ncurses getch/mousemask).
- * ww_input_parse() остаётся чистой функцией над сырыми байтами (SGR/X10)
- * и полностью покрыт юнит-тестами.
+ * Рабочий путь: ww_ui_poll_input() читает stdin и вызывает ww_input_parse().
+ * Парсер чистый (SGR/X10) и полностью покрыт юнит-тестами.
  */
 
 #ifndef WORKWATCHER_INPUT_H

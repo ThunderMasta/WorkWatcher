@@ -2,9 +2,9 @@
  * @file ui.h
  * @brief Форматирование, DOS-окно на ncurses и опрос ввода.
  *
- * Функции форматирования чистые и покрыты юнит-тестами. Отрисовка и ввод
- * идут через ncurses (WINDOW, raw, mousemask, getch); сырой разбор байтов
- * остаётся в модуле input для тестов и справки по протоколу.
+ * Функции форматирования чистые и покрыты юнит-тестами. Отрисовка — ncurses
+ * (WINDOW, raw). Ввод — select/read + ww_input_parse (getch/mousemask после
+ * raw() на части платформ блокируют цикл перерисовки).
  */
 
 #ifndef WORKWATCHER_UI_H
@@ -69,7 +69,7 @@ ww_status_t ww_ui_init(void);
 void ww_ui_shutdown(void);
 
 /**
- * @brief Отрисовывает DOS-окно (stdscr + WINDOW рамки и тени).
+ * @brief Отрисовывает DOS-окно на stdscr.
  *
  * @param projected    Состояние с учётом незавершённой фазы,
  *                     см. ww_tracker_project().
@@ -81,8 +81,7 @@ void ww_ui_render(const ww_tracker_t *projected, ww_mode_t active, double now_re
 /**
  * @brief Ждёт ввод не дольше @p timeout_us и возвращает событие.
  *
- * Использует timeout()/getch()/getmouse(). Ctrl+C → QUIT, клавиша или
- * нажатие кнопки мыши → TOGGLE, таймаут/resize/прочее → NONE.
+ * Ждёт через select(), читает stdin и разбирает ww_input_parse().
  */
 ww_input_event_t ww_ui_poll_input(long timeout_us);
 

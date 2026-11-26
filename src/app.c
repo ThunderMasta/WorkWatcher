@@ -26,7 +26,7 @@ static ww_input_event_t run_phase(ww_app_t *app)
     while (event == WW_INPUT_NONE) {
         double phase_elapsed = ww_clock_monotonic_seconds() - phase_start;
         ww_tracker_t projected = ww_tracker_project(&app->tracker, app->mode, phase_elapsed);
-        ww_ui_render(&projected, ww_stable_clock_now(&app->clock));
+        ww_ui_render(&projected, app->mode, ww_stable_clock_now(&app->clock));
 
         size_t len = ww_terminal_read_input(input, sizeof input, WW_REFRESH_INTERVAL_US);
         event = ww_input_parse(input, len);
@@ -38,8 +38,6 @@ static ww_input_event_t run_phase(ww_app_t *app)
 
 void ww_app_run(ww_app_t *app)
 {
-    ww_terminal_clear_screen();
-
     for (;;) {
         ww_input_event_t event = run_phase(app);
         if (event == WW_INPUT_QUIT) {
@@ -48,7 +46,9 @@ void ww_app_run(ww_app_t *app)
         app->mode = ww_mode_next(app->mode);
     }
 
-    /* Сводку печатаем уже в обычном режиме, чтобы работали переводы строк. */
+    /* Сначала снимаем ncurses, затем raw-режим — иначе сводка попадёт
+       в альтернативный экран и исчезнет при выходе. */
+    ww_ui_shutdown();
     ww_terminal_restore();
     ww_ui_print_summary(&app->tracker);
 }

@@ -58,9 +58,13 @@ CFLAGS  += $(CSTD) $(WARNINGS) $(OPTFLAGS) $(SANFLAGS)
 LDFLAGS += $(SANFLAGS)
 LDLIBS  ?=
 
-# clang-tidy, установленный не из Xcode, не знает путь к SDK macOS.
-ifeq ($(shell uname -s),Darwin)
+# Широкая ncurses нужна для кириллицы; на macOS достаточно системной -lncurses.
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+  LDLIBS += -lncurses
   LINT_SYSROOT := -isysroot $(shell xcrun --show-sdk-path 2>/dev/null)
+else
+  LDLIBS += -lncursesw
 endif
 
 # --- Файлы -------------------------------------------------------------------

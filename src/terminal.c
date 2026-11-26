@@ -56,6 +56,18 @@ void ww_terminal_restore(void)
     g_raw_mode_active = 0;
 }
 
+/* Собирает raw-атрибуты на основе сохранённых канонических. */
+static void build_raw_termios(struct termios *raw)
+{
+    *raw = g_saved_termios;
+    raw->c_lflag &= (tcflag_t) ~(ECHO | ICANON | ISIG | IEXTEN);
+    raw->c_iflag &= (tcflag_t) ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    raw->c_oflag &= (tcflag_t) ~(OPOST);
+    raw->c_cflag |= CS8;
+    raw->c_cc[VMIN] = 0;
+    raw->c_cc[VTIME] = 0;
+}
+
 ww_status_t ww_terminal_enter_raw_mode(void)
 {
     if (g_raw_mode_active) {
@@ -68,13 +80,8 @@ ww_status_t ww_terminal_enter_raw_mode(void)
         return WW_ERR_TERMINAL_ATTR;
     }
 
-    struct termios raw = g_saved_termios;
-    raw.c_lflag &= (tcflag_t) ~(ECHO | ICANON | ISIG | IEXTEN);
-    raw.c_iflag &= (tcflag_t) ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
-    raw.c_oflag &= (tcflag_t) ~(OPOST);
-    raw.c_cflag |= CS8;
-    raw.c_cc[VMIN] = 0;
-    raw.c_cc[VTIME] = 0;
+    struct termios raw;
+    build_raw_termios(&raw);
 
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) != 0) {
         return WW_ERR_TERMINAL_ATTR;
@@ -87,6 +94,18 @@ ww_status_t ww_terminal_enter_raw_mode(void)
 
     g_raw_mode_active = 1;
     return WW_OK;
+}
+
+void ww_terminal_reassert(void)
+{
+    if (!g_raw_mode_active) {
+        return;
+    }
+
+    struct termios raw;
+    build_raw_termios(&raw);
+    tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+    write_sequence(MOUSE_ENABLE, sizeof MOUSE_ENABLE - 1);
 }
 
 static void handle_fatal_signal(int sig)

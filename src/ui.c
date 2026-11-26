@@ -1,19 +1,45 @@
 #include "workwatcher/ui.h"
 
+#include <locale.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
+#include <wchar.h>
+
+#if defined(__has_include)
+#if __has_include(<ncursesw/ncurses.h>)
+#include <ncursesw/ncurses.h>
+#else
+#include <ncurses.h>
+#endif
+#else
+#include <ncurses.h>
+#endif
 
 #include "workwatcher/config.h"
-
-/* Позиционирование курсора в строку N и очистка этой строки. */
-#define LINE(n) "\033[" #n ";1H\033[2K"
-
-/* Приглушённый текст подсказки. */
-#define DIM   "\033[2m"
-#define RESET "\033[0m"
+#include "workwatcher/version.h"
 
 #define LABEL_WORK "Работа"
 #define LABEL_HOME "Дом"
+
+#define HINT_LINE "Клавиша/мышь — сменить режим, Ctrl+C — выход"
+
+/* Геометрия окна, включая рамку.
+ * 0 заголовок, 1 разделитель, 2–5 контент, 6 разделитель, 7 статус. */
+#define WIN_W 52
+#define WIN_H 8
+
+#define PAIR_DESKTOP 1
+#define PAIR_WINDOW  2
+#define PAIR_TITLE   3
+#define PAIR_ACTIVE  4
+#define PAIR_IDLE    5
+#define PAIR_STATUS  6
+#define PAIR_SHADOW  7
+
+static int g_ui_active = 0;
+static int g_colors = 0;
 
 /* Возвращает длину результата snprintf, ограниченную размером буфера. */
 static size_t clamp_length(int written, size_t size)
@@ -54,11 +80,213 @@ size_t ww_ui_format_finish_line(double work_seconds, double now_realtime, char *
     return clamp_length(written, size);
 }
 
-void ww_ui_render(const ww_tracker_t *projected, double now_realtime)
+/* Число экранных колонок UTF-8 строки в текущей локали. */
+static size_t utf8_cols(const char *s)
+{
+    size_t cols = 0;
+    mbstate_t st;
+    memset(&st, 0, sizeof st);
+
+    while (*s != '\0') {
+        wchar_t wc;
+        size_t n = mbrtowc(&wc, s, (size_t)MB_CUR_MAX, &st);
+        if (n == (size_t)-1 || n == (size_t)-2) {
+            ++cols;
+            ++s;
+            memset(&st, 0, sizeof st);
+            continue;
+        }
+        if (n == 0) {
+            break;
+        }
+        int w = wcwidth(wc);
+        cols += (w > 0) ? (size_t)w : 1U;
+        s += n;
+    }
+    return cols;
+}
+
+static void setup_colors(void)
+{
+    g_colors = 0;
+    if (!has_colors()) {
+        return;
+    }
+    if (start_color() == ERR) {
+        return;
+    }
+    g_colors = 1;
+
+    /* Классическая DOS/Turbo Vision палитра: синий рабочий стол, жёлтый
+       акцент активного режима, бирюзовая строка статуса. */
+    init_pair(PAIR_DESKTOP, COLOR_CYAN, COLOR_BLUE);
+    init_pair(PAIR_WINDOW, COLOR_WHITE, COLOR_BLUE);
+    init_pair(PAIR_TITLE, COLOR_BLACK, COLOR_CYAN);
+    init_pair(PAIR_ACTIVE, COLOR_YELLOW, COLOR_BLUE);
+    init_pair(PAIR_IDLE, COLOR_CYAN, COLOR_BLUE);
+    init_pair(PAIR_STATUS, COLOR_BLACK, COLOR_CYAN);
+    init_pair(PAIR_SHADOW, COLOR_BLACK, COLOR_BLACK);
+}
+
+ww_status_t ww_ui_init(void)
+{
+    if (g_ui_active) {
+        return WW_OK;
+    }
+
+    /* Локаль нужна для корректной ширины кириллицы в ncurses. */
+    setlocale(LC_ALL, "");
+
+    if (initscr() == NULL) {
+        return WW_ERR_TERMINAL_IO;
+    }
+
+    cbreak();
+    noecho();
+    nonl();
+    curs_set(0);
+    leaveok(stdscr, TRUE);
+    keypad(stdscr, FALSE);
+    meta(stdscr, TRUE);
+    setup_colors();
+
+    g_ui_active = 1;
+    return WW_OK;
+}
+
+void ww_ui_shutdown(void)
+{
+    if (!g_ui_active) {
+        return;
+    }
+    endwin();
+    g_ui_active = 0;
+    g_colors = 0;
+}
+
+static void set_pair(int pair)
+{
+    if (g_colors) {
+        attrset(COLOR_PAIR(pair));
+    }
+}
+
+static void fill_rect(int y, int x, int h, int w, int pair, chtype ch)
+{
+    set_pair(pair);
+    for (int row = 0; row < h; ++row) {
+        for (int col = 0; col < w; ++col) {
+            mvaddch(y + row, x + col, ch);
+        }
+    }
+}
+
+static void draw_box(int top, int left, int h, int w, int pair)
+{
+    set_pair(pair);
+
+    mvaddch(top, left, ACS_ULCORNER);
+    mvaddch(top, left + w - 1, ACS_URCORNER);
+    mvaddch(top + h - 1, left, ACS_LLCORNER);
+    mvaddch(top + h - 1, left + w - 1, ACS_LRCORNER);
+
+    for (int col = 1; col < w - 1; ++col) {
+        mvaddch(top, left + col, ACS_HLINE);
+        mvaddch(top + h - 1, left + col, ACS_HLINE);
+    }
+    for (int row = 1; row < h - 1; ++row) {
+        mvaddch(top + row, left, ACS_VLINE);
+        mvaddch(top + row, left + w - 1, ACS_VLINE);
+    }
+}
+
+static void draw_hline_tee(int y, int left, int w, int pair)
+{
+    set_pair(pair);
+    mvaddch(y, left, ACS_LTEE);
+    mvaddch(y, left + w - 1, ACS_RTEE);
+    for (int col = 1; col < w - 1; ++col) {
+        mvaddch(y, left + col, ACS_HLINE);
+    }
+}
+
+/* Пишет текст в pair, обрезая по экранным колонкам; остаток забивает пробелами. */
+static void put_clipped(int y, int x, int width, int pair, const char *text)
+{
+    set_pair(pair);
+    move(y, x);
+    for (int i = 0; i < width; ++i) {
+        addch(' ');
+    }
+
+    move(y, x);
+    size_t cols = 0;
+    mbstate_t st;
+    memset(&st, 0, sizeof st);
+    const char *s = text;
+
+    while (*s != '\0' && cols < (size_t)width) {
+        wchar_t wc;
+        size_t n = mbrtowc(&wc, s, (size_t)MB_CUR_MAX, &st);
+        if (n == (size_t)-1 || n == (size_t)-2) {
+            break;
+        }
+        if (n == 0) {
+            break;
+        }
+        int w = wcwidth(wc);
+        if (w < 0) {
+            w = 1;
+        }
+        if (cols + (size_t)w > (size_t)width) {
+            break;
+        }
+        addnstr(s, (int)n);
+        cols += (size_t)w;
+        s += n;
+    }
+}
+
+static void draw_title(int top, int left, int w, const char *title)
+{
+    int inner = w - 2;
+    size_t title_cols = utf8_cols(title);
+    if (title_cols > (size_t)inner) {
+        title_cols = (size_t)inner;
+    }
+    int pad = (inner - (int)title_cols) / 2;
+
+    set_pair(PAIR_TITLE);
+    move(top, left + 1);
+    for (int i = 0; i < inner; ++i) {
+        addch(' ');
+    }
+
+    /* Обрезаем по колонкам тем же хелпером, сдвиг — pad. */
+    put_clipped(top, left + 1 + pad, inner - pad, PAIR_TITLE, title);
+}
+
+static void draw_mode_line(int y, int x, const char *label, const char *value, int active)
+{
+    int pair = active ? PAIR_ACTIVE : PAIR_IDLE;
+    const char *mark = active ? ">" : " ";
+
+    set_pair(pair);
+    mvaddstr(y, x, mark);
+    mvaddstr(y, x + 2, label);
+    mvaddstr(y, x + 10, value);
+}
+
+void ww_ui_render(const ww_tracker_t *projected, ww_mode_t active, double now_realtime)
 {
     char work_buf[WW_UI_DURATION_BUFSIZE];
     char home_buf[WW_UI_DURATION_BUFSIZE];
     char finish_buf[WW_UI_FINISH_BUFSIZE];
+    char title[64];
+
+    if (!g_ui_active || projected == NULL) {
+        return;
+    }
 
     double work = ww_tracker_elapsed(projected, WW_MODE_WORK);
     double home = ww_tracker_elapsed(projected, WW_MODE_HOME);
@@ -67,12 +295,60 @@ void ww_ui_render(const ww_tracker_t *projected, double now_realtime)
     ww_ui_format_duration(home, home_buf, sizeof home_buf);
     ww_ui_format_finish_line(work, now_realtime, finish_buf, sizeof finish_buf);
 
-    /* В raw-режиме OPOST отключён, поэтому переводы строк не используются:
-       каждая строка адресуется явно. */
-    printf(LINE(1) LABEL_WORK ": %s - " LABEL_HOME ": %s" LINE(2) "%s" LINE(3) DIM
-           "Любая клавиша или кнопка мыши — сменить режим, Ctrl+C — выход" RESET,
-           work_buf, home_buf, finish_buf);
-    fflush(stdout);
+    const char *mode_label = (active == WW_MODE_HOME) ? LABEL_HOME : LABEL_WORK;
+    snprintf(title, sizeof title, " %s - %s ", WW_APP_NAME, mode_label);
+
+    int max_y = 0;
+    int max_x = 0;
+    getmaxyx(stdscr, max_y, max_x);
+
+    erase();
+
+    if (g_colors) {
+        bkgdset(COLOR_PAIR(PAIR_DESKTOP) | (chtype)' ');
+        bkgd(COLOR_PAIR(PAIR_DESKTOP) | (chtype)' ');
+    }
+
+    if (max_y < WIN_H + 1 || max_x < WIN_W + 1) {
+        put_clipped(0, 0, max_x > 0 ? max_x : 0, PAIR_WINDOW, title);
+        if (max_y > 1) {
+            put_clipped(1, 0, max_x, PAIR_ACTIVE, work_buf);
+        }
+        if (max_y > 2) {
+            put_clipped(2, 0, max_x, PAIR_WINDOW, finish_buf);
+        }
+        refresh();
+        return;
+    }
+
+    int top = (max_y - WIN_H) / 2;
+    int left = (max_x - WIN_W) / 2;
+
+    /* Тень справа и снизу — типичный приём DOS/Turbo Vision. */
+    if (top + WIN_H < max_y && left + WIN_W < max_x) {
+        fill_rect(top + 1, left + WIN_W, WIN_H, 1, PAIR_SHADOW, ACS_CKBOARD);
+        fill_rect(top + WIN_H, left + 1, 1, WIN_W, PAIR_SHADOW, ACS_CKBOARD);
+    }
+
+    fill_rect(top, left, WIN_H, WIN_W, PAIR_WINDOW, ' ');
+    draw_box(top, left, WIN_H, WIN_W, PAIR_WINDOW);
+    draw_title(top, left, WIN_W, title);
+    draw_hline_tee(top + 1, left, WIN_W, PAIR_WINDOW);
+
+    int cx = left + 2;
+    draw_mode_line(top + 2, cx, LABEL_WORK, work_buf, active == WW_MODE_WORK);
+    draw_mode_line(top + 3, cx, LABEL_HOME, home_buf, active == WW_MODE_HOME);
+    put_clipped(top + 5, cx, WIN_W - 4, PAIR_WINDOW, finish_buf);
+
+    draw_hline_tee(top + WIN_H - 2, left, WIN_W, PAIR_WINDOW);
+    put_clipped(top + WIN_H - 1, left + 1, WIN_W - 2, PAIR_STATUS, HINT_LINE);
+
+    /* Углы нижней рамки поверх статусной полосы. */
+    set_pair(PAIR_WINDOW);
+    mvaddch(top + WIN_H - 1, left, ACS_LLCORNER);
+    mvaddch(top + WIN_H - 1, left + WIN_W - 1, ACS_LRCORNER);
+
+    refresh();
 }
 
 void ww_ui_print_summary(const ww_tracker_t *tracker)

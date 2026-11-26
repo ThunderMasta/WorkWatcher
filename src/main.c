@@ -3,6 +3,7 @@
  * @brief Точка входа: разбор аргументов, подготовка терминала, запуск.
  */
 
+#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,7 @@
 #include "workwatcher/app.h"
 #include "workwatcher/status.h"
 #include "workwatcher/terminal.h"
+#include "workwatcher/ui.h"
 #include "workwatcher/version.h"
 
 static void print_usage(FILE *out)
@@ -61,6 +63,9 @@ int main(int argc, char **argv)
         return early_exit;
     }
 
+    /* До ncurses: иначе ширина кириллицы считается неверно. */
+    setlocale(LC_ALL, "");
+
     ww_status_t status = ww_terminal_enter_raw_mode();
     if (status != WW_OK) {
         fprintf(stderr, "Не удалось настроить терминал: %s\n", ww_status_describe(status));
@@ -68,6 +73,17 @@ int main(int argc, char **argv)
     }
     atexit(ww_terminal_restore);
     ww_terminal_install_signal_handlers();
+
+    status = ww_ui_init();
+    if (status != WW_OK) {
+        fprintf(stderr, "Не удалось инициализировать интерфейс: %s\n", ww_status_describe(status));
+        return EXIT_FAILURE;
+    }
+    /* atexit — LIFO: сначала endwin, затем восстановление termios. */
+    atexit(ww_ui_shutdown);
+
+    /* initscr() мог сбросить raw-режим и отчёты мыши. */
+    ww_terminal_reassert();
 
     ww_app_t app;
     ww_app_init(&app);

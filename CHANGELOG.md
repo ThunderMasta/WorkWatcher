@@ -16,6 +16,9 @@
   кнопки по-прежнему переключают режим.
 - Hover по «Выход»: жёлтая подсветка кнопки и смена указателя (OSC 22
   `pointer`; иначе остаётся системная стрелка `default`).
+- После «Выход» на **macOS Terminal.app** окно скрывается (AppleScript по
+  `TERM_PROGRAM=Apple_Terminal`); сводка «Итого» и очистка буфера — только
+  если окно остаётся видимым (иначе текст перед следующим стартом не пишем).
 - `terminal` отвечает только за prepare (TTY + сохранённый termios) и
   async-signal-safe restore; убраны dual-raw/`reassert`, `read_input` и
   `clear_screen`.

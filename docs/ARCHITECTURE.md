@@ -87,7 +87,9 @@ config ◄── (все модули, только макросы)
 Обработчики `SIGINT`/`SIGTERM`/`SIGHUP` вызывают только async-signal-safe
 `ww_terminal_restore` (`write` отключения мыши, `tcflush`, `tcsetattr`,
 `_exit`) — `endwin()` в сигнале недопустим. На штатном выходе: `endwin`,
-затем `ww_terminal_restore`, затем сводка через `printf`.
+затем `ww_terminal_restore`. Если хост скроет окно (macOS Terminal.app):
+очистка экрана/scrollback и `ww_terminal_hide_host_window` без сводки
+«Итого»; иначе — `printf` сводки.
 
 ### Отрисовка
 

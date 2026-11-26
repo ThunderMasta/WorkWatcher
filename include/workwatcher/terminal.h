@@ -35,4 +35,26 @@ void ww_terminal_restore(void);
  */
 void ww_terminal_install_signal_handlers(void);
 
+/**
+ * @brief 1, если после выхода окно хоста будет скрыто (сводка там не видна).
+ *
+ * Сейчас: macOS + TERM_PROGRAM=Apple_Terminal.
+ */
+int ww_terminal_hides_host_window(void);
+
+/**
+ * @brief Очищает экран и scrollback (CSI), чтобы в скрытом окне не копился текст.
+ *
+ * Не из обработчика сигнала.
+ */
+void ww_terminal_clear_display(void);
+
+/**
+ * @brief Пытается скрыть окно хост-терминала после штатного выхода.
+ *
+ * На macOS при TERM_PROGRAM=Apple_Terminal — AppleScript
+ * (`visible of front window`). Иначе no-op. Не из обработчика сигнала.
+ */
+void ww_terminal_hide_host_window(void);
+
 #endif /* WORKWATCHER_TERMINAL_H */

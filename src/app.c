@@ -46,5 +46,13 @@ void ww_app_run(ww_app_t *app)
        сводка попадёт в альтернативный экран. */
     ww_ui_shutdown();
     ww_terminal_restore();
-    ww_ui_print_summary(&app->tracker);
+
+    if (ww_terminal_hides_host_window()) {
+        /* Окно спрячется: «Итого» и любой текст перед следующим стартом
+           пользователь не увидит — очищаем буфер и скрываем. */
+        ww_terminal_clear_display();
+        ww_terminal_hide_host_window();
+    } else {
+        ww_ui_print_summary(&app->tracker);
+    }
 }

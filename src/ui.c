@@ -25,23 +25,43 @@
 #define LABEL_WORK "Работа"
 #define LABEL_HOME "Дом"
 
-#define HINT_LINE "Клавиша/мышь — сменить режим, Ctrl+C — выход"
+#define HINT_LINE  "Клавиша/мышь — сменить режим"
+#define EXIT_LABEL "[ Выход ]"
 
 /* Геометрия окна, включая рамку.
  * 0 заголовок, 1 разделитель, 2–5 контент, 6 разделитель, 7 статус. */
 #define WIN_W 52
 #define WIN_H 8
 
-#define PAIR_DESKTOP 1
-#define PAIR_WINDOW  2
-#define PAIR_TITLE   3
-#define PAIR_ACTIVE  4
-#define PAIR_IDLE    5
-#define PAIR_STATUS  6
-#define PAIR_SHADOW  7
+#define PAIR_DESKTOP      1
+#define PAIR_WINDOW       2
+#define PAIR_TITLE        3
+#define PAIR_ACTIVE       4
+#define PAIR_IDLE         5
+#define PAIR_STATUS       6
+#define PAIR_SHADOW       7
+#define PAIR_BUTTON       8
+#define PAIR_BUTTON_HOVER 9
+
+/* OSC 22: форма указателя мыши (CSS). Поддерживают kitty/WezTerm/foot и др.;
+   Terminal.app может игнорировать — тогда остаётся смена стиля кнопки. */
+#define OSC_POINTER_ARROW "\033]22;default\007"
+#define OSC_POINTER_HAND  "\033]22;pointer\007"
+
+/* Явно: 1000 press/release, 1003 любое движение (hover), 1006 SGR. */
+#define MOUSE_ENABLE  "\033[?1000h\033[?1003h\033[?1006h"
+#define MOUSE_DISABLE "\033[?1006l\033[?1003l\033[?1000l"
 
 static int g_ui_active = 0;
 static int g_colors = 0;
+static int g_exit_hit_valid = 0;
+static int g_exit_hovered = 0;
+static int g_pointer_is_hand = 0;
+static ww_rect_t g_exit_hit;
+
+/* Накопитель ввода: motion CSI часто приходит кусками. */
+static unsigned char g_inbuf[WW_INPUT_BUFFER_SIZE * 2U];
+static size_t g_inlen = 0;
 
 /* Возвращает длину результата snprintf, ограниченную размером буфера. */
 static size_t clamp_length(int written, size_t size)
@@ -128,6 +148,57 @@ static void setup_colors(void)
     init_pair(PAIR_IDLE, COLOR_CYAN, COLOR_BLUE);
     init_pair(PAIR_STATUS, COLOR_BLACK, COLOR_CYAN);
     init_pair(PAIR_SHADOW, COLOR_BLACK, COLOR_BLACK);
+    init_pair(PAIR_BUTTON, COLOR_BLACK, COLOR_WHITE);
+    init_pair(PAIR_BUTTON_HOVER, COLOR_BLACK, COLOR_YELLOW);
+}
+
+/* Пишет CSI/OSC целиком; ошибки терминала игнорируем (как в terminal.c). */
+static void write_sequence(const char *seq, size_t len)
+{
+    while (len > 0) {
+        ssize_t written = write(STDOUT_FILENO, seq, len);
+        if (written <= 0) {
+            return;
+        }
+        seq += written;
+        len -= (size_t)written;
+    }
+}
+
+static void apply_pointer_shape(int hand)
+{
+    if (hand == g_pointer_is_hand) {
+        return;
+    }
+    g_pointer_is_hand = hand;
+    const char *seq = hand ? OSC_POINTER_HAND : OSC_POINTER_ARROW;
+    write_sequence(seq, strlen(seq));
+}
+
+/* Принудительно (даже если уже «default») — после initscr курсор может быть любым. */
+static void force_pointer_shape(int hand)
+{
+    g_pointer_is_hand = !hand;
+    apply_pointer_shape(hand);
+}
+
+static int exit_button_contains(int col, int row)
+{
+    if (!g_exit_hit_valid || col <= 0 || row <= 0) {
+        return 0;
+    }
+    return col >= g_exit_hit.col_min && col <= g_exit_hit.col_max && row >= g_exit_hit.row_min &&
+           row <= g_exit_hit.row_max;
+}
+
+static void update_exit_hover(int col, int row)
+{
+    int hovered = exit_button_contains(col, row);
+    if (hovered == g_exit_hovered) {
+        return;
+    }
+    g_exit_hovered = hovered;
+    apply_pointer_shape(hovered);
 }
 
 ww_status_t ww_ui_init(void)
@@ -142,7 +213,7 @@ ww_status_t ww_ui_init(void)
         return WW_ERR_TERMINAL_IO;
     }
 
-    /* raw: Ctrl+C → байт 0x03. Ввод — select/read + ww_input_parse (не getch). */
+    /* raw: ISIG выкл. Ввод — select/read + ww_input_parse (не getch). */
     raw();
     noecho();
     nonl();
@@ -151,12 +222,17 @@ ww_status_t ww_ui_init(void)
     leaveok(stdscr, FALSE);
     flushinp();
 
-    /* Мышь через ncurses output; байты забирает наш read. */
-    mousemask((mmask_t)(BUTTON1_PRESSED | BUTTON2_PRESSED | BUTTON3_PRESSED), NULL);
+    /* ncurses + явный CSI: mousemask один не всегда включает 1003. */
+    mousemask((mmask_t)(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION), NULL);
     mouseinterval(0);
+    write_sequence(MOUSE_ENABLE, sizeof MOUSE_ENABLE - 1);
 
     setup_colors();
+    force_pointer_shape(0);
 
+    g_exit_hit_valid = 0;
+    g_exit_hovered = 0;
+    g_inlen = 0;
     g_ui_active = 1;
     return WW_OK;
 }
@@ -166,10 +242,15 @@ void ww_ui_shutdown(void)
     if (!g_ui_active) {
         return;
     }
+    force_pointer_shape(0);
+    write_sequence(MOUSE_DISABLE, sizeof MOUSE_DISABLE - 1);
     mousemask((mmask_t)0, NULL);
     endwin();
     g_ui_active = 0;
     g_colors = 0;
+    g_exit_hit_valid = 0;
+    g_exit_hovered = 0;
+    g_inlen = 0;
 }
 
 static void set_pair(int pair)
@@ -279,6 +360,34 @@ static void draw_mode_line(int y, int x, const char *label, const char *value, i
     mvaddstr(y, x + 10, value);
 }
 
+/* Рисует кнопку «Выход» и запоминает hit-box в 1-based координатах мыши. */
+static void draw_exit_button(int y, int x)
+{
+    const int width = (int)utf8_cols(EXIT_LABEL);
+    const int pair = g_exit_hovered ? PAIR_BUTTON_HOVER : PAIR_BUTTON;
+
+    if (g_colors) {
+        attr_t attrs = (attr_t)COLOR_PAIR(pair);
+        if (g_exit_hovered) {
+            attrs |= (attr_t)A_BOLD;
+        }
+        wattrset(stdscr, (int)attrs);
+    } else if (g_exit_hovered) {
+        attrset(A_REVERSE | A_BOLD);
+    }
+    mvaddstr(y, x, EXIT_LABEL);
+    if (!g_colors && g_exit_hovered) {
+        attrset(A_NORMAL);
+    }
+
+    /* SGR/X10: колонки и строки с 1. ncurses — с 0. */
+    g_exit_hit.col_min = x + 1;
+    g_exit_hit.col_max = x + width;
+    g_exit_hit.row_min = y + 1;
+    g_exit_hit.row_max = y + 1;
+    g_exit_hit_valid = 1;
+}
+
 void ww_ui_render(const ww_tracker_t *projected, ww_mode_t active, double now_realtime)
 {
     char work_buf[WW_UI_DURATION_BUFSIZE];
@@ -289,6 +398,8 @@ void ww_ui_render(const ww_tracker_t *projected, ww_mode_t active, double now_re
     if (!g_ui_active || projected == NULL) {
         return;
     }
+
+    g_exit_hit_valid = 0;
 
     double work = ww_tracker_elapsed(projected, WW_MODE_WORK);
     double home = ww_tracker_elapsed(projected, WW_MODE_HOME);
@@ -319,6 +430,10 @@ void ww_ui_render(const ww_tracker_t *projected, ww_mode_t active, double now_re
         if (max_y > 2) {
             put_clipped(2, 0, max_x, PAIR_WINDOW, finish_buf);
         }
+        if (max_y > 3 && max_x >= (int)utf8_cols(EXIT_LABEL)) {
+            draw_exit_button(3, 0);
+        }
+        clearok(stdscr, TRUE);
         refresh();
         return;
     }
@@ -342,16 +457,26 @@ void ww_ui_render(const ww_tracker_t *projected, ww_mode_t active, double now_re
     put_clipped(top + 5, cx, WIN_W - 4, PAIR_WINDOW, finish_buf);
 
     draw_hline_tee(top + WIN_H - 2, left, WIN_W, PAIR_WINDOW);
-    put_clipped(top + WIN_H - 1, left + 1, WIN_W - 2, PAIR_STATUS, HINT_LINE);
+
+    const int status_y = top + WIN_H - 1;
+    const int btn_w = (int)utf8_cols(EXIT_LABEL);
+    const int btn_x = left + WIN_W - 1 - btn_w;
+    const int hint_w = btn_x - (left + 1) - 1;
+    if (hint_w > 0) {
+        put_clipped(status_y, left + 1, hint_w, PAIR_STATUS, HINT_LINE);
+    }
+    draw_exit_button(status_y, btn_x);
 
     set_pair(PAIR_WINDOW);
-    mvaddch(top + WIN_H - 1, left, ACS_LLCORNER);
-    mvaddch(top + WIN_H - 1, left + WIN_W - 1, ACS_LRCORNER);
+    mvaddch(status_y, left, ACS_LLCORNER);
+    mvaddch(status_y, left + WIN_W - 1, ACS_LRCORNER);
 
     /* Каждый кадр — полная отрисовка: иначе после первого refresh ncurses
        может не вытолкнуть смену цифр таймера в физический терминал. */
     clearok(stdscr, TRUE);
     refresh();
+    /* refresh/endwin могут сбить DECSET мыши — включаем снова для hover. */
+    write_sequence(MOUSE_ENABLE, sizeof MOUSE_ENABLE - 1);
 }
 
 static int wait_stdin(long timeout_us)
@@ -371,31 +496,43 @@ static int wait_stdin(long timeout_us)
 
 ww_input_event_t ww_ui_poll_input(long timeout_us)
 {
-    unsigned char buf[WW_INPUT_BUFFER_SIZE];
-
     if (!g_ui_active) {
         return WW_INPUT_NONE;
     }
 
-    if (wait_stdin(timeout_us) <= 0) {
+    /* Неполный CSI в буфере — короткое ожидание хвоста; иначе полный кадр. */
+    long wait_us = (g_inlen > 0) ? WW_KEY_TAIL_US : timeout_us;
+    if (wait_stdin(wait_us) > 0) {
+        do {
+            ssize_t n = read(STDIN_FILENO, g_inbuf + g_inlen, sizeof g_inbuf - g_inlen);
+            if (n <= 0) {
+                break;
+            }
+            g_inlen += (size_t)n;
+        } while (g_inlen < sizeof g_inbuf && wait_stdin(WW_KEY_TAIL_US) > 0);
+    }
+
+    if (g_inlen == 0) {
         return WW_INPUT_NONE;
     }
 
-    ssize_t n = read(STDIN_FILENO, buf, sizeof buf);
-    if (n <= 0) {
-        return WW_INPUT_NONE;
-    }
-    size_t len = (size_t)n;
-
-    while (len < sizeof buf && wait_stdin(WW_KEY_TAIL_US) > 0) {
-        n = read(STDIN_FILENO, buf + len, sizeof buf - len);
-        if (n <= 0) {
-            break;
-        }
-        len += (size_t)n;
+    ww_mouse_info_t mouse;
+    size_t consumed = 0;
+    ww_input_event_t event =
+        ww_input_parse(g_inbuf, g_inlen, g_exit_hit_valid ? &g_exit_hit : NULL, &mouse, &consumed);
+    if (mouse.present) {
+        update_exit_hover(mouse.col, mouse.row);
     }
 
-    return ww_input_parse(buf, len);
+    if (consumed >= g_inlen) {
+        g_inlen = 0;
+    } else if (consumed > 0) {
+        memmove(g_inbuf, g_inbuf + consumed, g_inlen - consumed);
+        g_inlen -= consumed;
+    }
+    /* consumed == 0: весь буфер — неполный CSI, ждём догрузки. */
+
+    return event;
 }
 
 void ww_ui_print_summary(const ww_tracker_t *tracker)

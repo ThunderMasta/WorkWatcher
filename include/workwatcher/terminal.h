@@ -35,6 +35,14 @@ ww_status_t ww_terminal_enter_raw_mode(void);
 void ww_terminal_restore(void);
 
 /**
+ * @brief Повторно применяет raw-атрибуты и включает отчёты мыши.
+ *
+ * Нужна после ww_ui_init(): initscr() может сбросить termios и отключить
+ * мышь. Без активного raw-режима ничего не делает.
+ */
+void ww_terminal_reassert(void);
+
+/**
  * @brief Устанавливает обработчики SIGINT/SIGTERM/SIGHUP, которые
  *        восстанавливают терминал и завершают процесс.
  */

@@ -1,10 +1,11 @@
 /**
  * @file ui.h
- * @brief Форматирование и отрисовка кадра.
+ * @brief Форматирование и отрисовка кадра в стиле DOS через ncurses.
  *
  * Функции форматирования чистые (не обращаются к часам и терминалу) и
- * покрыты юнит-тестами; ww_ui_render() лишь собирает их результат и
- * выводит в stdout.
+ * покрыты юнит-тестами; ww_ui_render() собирает их результат и рисует
+ * окно. Ввод по-прежнему читается модулем terminal/input — ncurses
+ * используется только для вывода.
  */
 
 #ifndef WORKWATCHER_UI_H
@@ -12,6 +13,7 @@
 
 #include <stddef.h>
 
+#include "workwatcher/status.h"
 #include "workwatcher/tracker.h"
 
 /** Достаточный размер буфера для ww_ui_format_duration(). */
@@ -51,16 +53,37 @@ size_t ww_ui_format_duration(double seconds, char *buf, size_t size);
 size_t ww_ui_format_finish_line(double work_seconds, double now_realtime, char *buf, size_t size);
 
 /**
- * @brief Отрисовывает кадр поверх предыдущего (без очистки экрана).
+ * @brief Инициализирует ncurses и цветовую схему DOS.
+ *
+ * Вызывать после ww_terminal_enter_raw_mode(); затем —
+ * ww_terminal_reassert(), потому что initscr() может сбросить termios
+ * и отчёты мыши. Идемпотентна.
+ *
+ * @return ::WW_OK либо код ошибки.
+ */
+ww_status_t ww_ui_init(void);
+
+/**
+ * @brief Завершает работу ncurses (endwin).
+ *
+ * Идемпотентна; допустимо вызывать из atexit() и перед печатью сводки.
+ */
+void ww_ui_shutdown(void);
+
+/**
+ * @brief Отрисовывает DOS-окно поверх предыдущего кадра.
  *
  * @param projected    Состояние с учётом незавершённой фазы,
  *                     см. ww_tracker_project().
+ * @param active       Активный режим (подсвечивается в окне).
  * @param now_realtime Текущие настенные часы, UNIX-секунды с долями.
  */
-void ww_ui_render(const ww_tracker_t *projected, double now_realtime);
+void ww_ui_render(const ww_tracker_t *projected, ww_mode_t active, double now_realtime);
 
 /**
  * @brief Печатает итоговую сводку в обычном (не raw) режиме терминала.
+ *
+ * Вызывать после ww_ui_shutdown() и ww_terminal_restore().
  */
 void ww_ui_print_summary(const ww_tracker_t *tracker);
 

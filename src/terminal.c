@@ -1,9 +1,14 @@
 #include "workwatcher/terminal.h"
 
 #include <signal.h>
+#include <stdlib.h>
 #include <string.h>
 #include <termios.h>
 #include <unistd.h>
+
+#if defined(__APPLE__)
+#include <sys/wait.h>
+#endif
 
 /*
  * Отключение отчётов мыши на случай аварийного выхода без endwin().
@@ -79,4 +84,46 @@ void ww_terminal_install_signal_handlers(void)
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGHUP, &sa, NULL);
+}
+
+int ww_terminal_hides_host_window(void)
+{
+#if defined(__APPLE__)
+    const char *prog = getenv("TERM_PROGRAM");
+    return (prog != NULL && strcmp(prog, "Apple_Terminal") == 0) ? 1 : 0;
+#else
+    return 0;
+#endif
+}
+
+void ww_terminal_clear_display(void)
+{
+    /* 2J — экран, 3J — scrollback (поддерживается Terminal.app), H — домой. */
+    static const char clear_seq[] = "\033[H\033[2J\033[3J";
+    write_sequence(clear_seq, sizeof clear_seq - 1);
+}
+
+void ww_terminal_hide_host_window(void)
+{
+#if defined(__APPLE__)
+    if (!ww_terminal_hides_host_window()) {
+        return;
+    }
+
+    /* Скрываем только окно, в котором крутился WorkWatcher (front). */
+    static const char *const script =
+        "tell application \"Terminal\" to set visible of front window to false";
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        execlp("osascript", "osascript", "-e", script, (char *)NULL);
+        _exit(127);
+    }
+    if (pid > 0) {
+        int status = 0;
+        (void)waitpid(pid, &status, 0);
+    }
+#else
+    /* Другие ОС: нет стабильного API скрытия окна эмулятора. */
+#endif
 }
